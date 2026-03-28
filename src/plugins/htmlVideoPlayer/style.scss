@@ -116,6 +116,79 @@ video[controls]::-webkit-media-controls {
     white-space: pre-line;
 }
 
+.pauseTranslateOverlay-words {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.pauseTranslateOverlay-word {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #f8fafc;
+    padding: 0.45rem 0.85rem;
+    font: inherit;
+    font-size: 0.95rem;
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+.pauseTranslateOverlay-word-active,
+.pauseTranslateOverlay-word:hover,
+.pauseTranslateOverlay-word:focus-visible {
+    border-color: rgba(255, 224, 138, 0.8);
+    background: rgba(255, 224, 138, 0.14);
+    color: #ffe08a;
+    outline: none;
+}
+
+.pauseTranslateOverlay-inspector {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.pauseTranslateOverlay-inspector-word {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #f8fafc;
+}
+
+.pauseTranslateOverlay-inspector-pos {
+    display: inline-block;
+    margin-top: 0.35rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    background: rgba(147, 197, 253, 0.16);
+    color: #93c5fd;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.pauseTranslateOverlay-inspector-context {
+    margin-top: 0.7rem;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.95rem;
+}
+
+.pauseTranslateOverlay-inspector-translations {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.85rem;
+}
+
+.pauseTranslateOverlay-translation-chip {
+    padding: 0.4rem 0.7rem;
+    border-radius: 0.85rem;
+    background: rgba(255, 255, 255, 0.08);
+    color: #f8fafc;
+    font-size: 0.92rem;
+}
+
 .pauseTranslateOverlay[data-tone="loading"] .pauseTranslateOverlay-translated {
     color: #93c5fd;
 }
