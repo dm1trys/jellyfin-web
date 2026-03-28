@@ -1811,6 +1811,35 @@ export class HtmlVideoPlayer {
         }
     }
 
+    getVisibleSubtitleText() {
+        const customSubtitleText = [
+            this.#videoSubtitlesElem,
+            this.#videoSecondarySubtitlesElem
+        ]
+            .filter((element) => element && !element.classList.contains('hide'))
+            .map((element) => element.textContent?.trim())
+            .filter(Boolean)
+            .join('\n');
+
+        if (customSubtitleText) {
+            return customSubtitleText;
+        }
+
+        const mediaElement = this.#mediaElement;
+        if (!mediaElement?.textTracks) {
+            return '';
+        }
+
+        const nativeCueText = Array.from(mediaElement.textTracks)
+            .filter((track) => track.mode === 'showing' && track.activeCues?.length)
+            .flatMap((track) => Array.from(track.activeCues || []))
+            .map((cue) => cue.text?.trim())
+            .filter(Boolean)
+            .join('\n');
+
+        return nativeCueText || '';
+    }
+
     duration() {
         const mediaElement = this.#mediaElement;
         if (mediaElement) {

@@ -14,4 +14,5 @@ export interface Plugin {
 
 export interface PlayerPlugin extends Plugin {
     isLocalPlayer?: boolean
+    getVisibleSubtitleText?: () => string
 }

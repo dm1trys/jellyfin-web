@@ -30,7 +30,9 @@
     }
   ],
   "menuLinks": [],
-  "servers": [],
+  "servers": [
+    "http://localhost:8096"
+  ],
   "plugins": [
     "playAccessValidation/plugin",
     "experimentalWarnings/plugin",

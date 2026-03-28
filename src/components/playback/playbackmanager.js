@@ -26,6 +26,7 @@ import { getItemBackdropImageUrl } from '../../utils/jellyfin-apiclient/backdrop
 import { PlayerEvent } from 'apps/stable/features/playback/constants/playerEvent';
 import { bindMediaSegmentManager } from 'apps/stable/features/playback/utils/mediaSegmentManager';
 import { bindMediaSessionSubscriber } from 'apps/stable/features/playback/utils/mediaSessionSubscriber';
+import { bindPauseTranslateSubscriber } from 'apps/stable/features/playback/utils/pauseTranslateSubscriber';
 import { AppFeature } from 'constants/appFeature';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import { MediaError } from 'types/mediaError';
@@ -4299,6 +4300,7 @@ export class PlaybackManager {
 export const playbackManager = new PlaybackManager();
 bindMediaSegmentManager(playbackManager);
 bindMediaSessionSubscriber(playbackManager);
+bindPauseTranslateSubscriber(playbackManager);
 
 window.addEventListener('beforeunload', function () {
     try {
