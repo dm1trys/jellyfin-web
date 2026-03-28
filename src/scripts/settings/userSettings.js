@@ -350,6 +350,22 @@ export class UserSettings {
         return this.get('language', false);
     }
 
+    pauseTranslateSourceLanguage(val) {
+        if (val !== undefined) {
+            return this.set('pauseTranslateSourceLanguage', val.toString(), false);
+        }
+
+        return this.get('pauseTranslateSourceLanguage', false) || 'en';
+    }
+
+    pauseTranslateTargetLanguage(val) {
+        if (val !== undefined) {
+            return this.set('pauseTranslateTargetLanguage', val.toString(), false);
+        }
+
+        return this.get('pauseTranslateTargetLanguage', false) || 'uk';
+    }
+
     /**
      * Get or set datetime locale.
      * @param {string|undefined} [val] - Datetime locale.
@@ -698,6 +714,8 @@ export const enableBackdrops = currentSettings.enableBackdrops.bind(currentSetti
 export const detailsBanner = currentSettings.detailsBanner.bind(currentSettings);
 export const useEpisodeImagesInNextUpAndResume = currentSettings.useEpisodeImagesInNextUpAndResume.bind(currentSettings);
 export const language = currentSettings.language.bind(currentSettings);
+export const pauseTranslateSourceLanguage = currentSettings.pauseTranslateSourceLanguage.bind(currentSettings);
+export const pauseTranslateTargetLanguage = currentSettings.pauseTranslateTargetLanguage.bind(currentSettings);
 export const dateTimeLocale = currentSettings.dateTimeLocale.bind(currentSettings);
 export const skipBackLength = currentSettings.skipBackLength.bind(currentSettings);
 export const skipForwardLength = currentSettings.skipForwardLength.bind(currentSettings);

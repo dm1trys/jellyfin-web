@@ -1,13 +1,8 @@
 import type { PlaybackManager } from 'components/playback/playbackmanager';
 import type { PlayerPlugin } from 'types/plugin';
+import { currentSettings } from 'scripts/settings/userSettings';
 
 import { PlaybackSubscriber } from './playbackSubscriber';
-
-const TRANSLATION_CONFIG = {
-    sourceLanguage: 'en',
-    targetLanguage: 'uk',
-    provider: 'mymemory'
-} as const;
 
 const OVERLAY_CLASS = 'pauseTranslateOverlay';
 
@@ -76,19 +71,18 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
     }
 
     private async translateSubtitleText(text: string) {
+        const sourceLanguage = currentSettings.pauseTranslateSourceLanguage();
+        const targetLanguage = currentSettings.pauseTranslateTargetLanguage();
+
         if (this.translationCache.has(text)) {
             return this.translationCache.get(text) as string;
-        }
-
-        if (TRANSLATION_CONFIG.provider !== 'mymemory') {
-            throw new Error(`Unsupported provider: ${TRANSLATION_CONFIG.provider}`);
         }
 
         const url = new URL('https://api.mymemory.translated.net/get');
         url.searchParams.set('q', text);
         url.searchParams.set(
             'langpair',
-            `${TRANSLATION_CONFIG.sourceLanguage}|${TRANSLATION_CONFIG.targetLanguage}`
+            `${sourceLanguage}|${targetLanguage}`
         );
 
         const response = await fetch(url.toString());

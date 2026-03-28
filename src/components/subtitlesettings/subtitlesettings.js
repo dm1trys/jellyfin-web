@@ -39,6 +39,21 @@ function getSubtitleAppearanceObject(context) {
     };
 }
 
+function populatePauseTranslateLanguages(select, languages) {
+    let html = '';
+
+    for (const culture of languages) {
+        const languageCode = culture.TwoLetterISOLanguageName;
+        if (!languageCode) {
+            continue;
+        }
+
+        html += `<option value='${languageCode}'>${culture.DisplayName}</option>`;
+    }
+
+    select.innerHTML = html;
+}
+
 function loadForm(context, user, userSettings, appearanceSettings, apiClient) {
     apiClient.getCultures().then(function (allCultures) {
         if (appHost.supports(AppFeature.SubtitleBurnIn) && user.Policy.EnableVideoPlaybackTranscoding) {
@@ -46,10 +61,16 @@ function loadForm(context, user, userSettings, appearanceSettings, apiClient) {
         }
 
         const selectSubtitleLanguage = context.querySelector('#selectSubtitleLanguage');
+        const selectPauseTranslateSourceLanguage = context.querySelector('#selectPauseTranslateSourceLanguage');
+        const selectPauseTranslateTargetLanguage = context.querySelector('#selectPauseTranslateTargetLanguage');
 
         settingsHelper.populateLanguages(selectSubtitleLanguage, allCultures);
+        populatePauseTranslateLanguages(selectPauseTranslateSourceLanguage, allCultures);
+        populatePauseTranslateLanguages(selectPauseTranslateTargetLanguage, allCultures);
 
         selectSubtitleLanguage.value = user.Configuration.SubtitleLanguagePreference || '';
+        selectPauseTranslateSourceLanguage.value = userSettings.pauseTranslateSourceLanguage();
+        selectPauseTranslateTargetLanguage.value = userSettings.pauseTranslateTargetLanguage();
         context.querySelector('#selectSubtitlePlaybackMode').value = user.Configuration.SubtitleMode || '';
 
         context.querySelector('#selectSubtitlePlaybackMode').dispatchEvent(new CustomEvent('change', {}));
@@ -87,6 +108,8 @@ function saveUser(context, user, userSettingsInstance, appearanceKey, apiClient)
 
     user.Configuration.SubtitleLanguagePreference = context.querySelector('#selectSubtitleLanguage').value;
     user.Configuration.SubtitleMode = context.querySelector('#selectSubtitlePlaybackMode').value;
+    userSettingsInstance.pauseTranslateSourceLanguage(context.querySelector('#selectPauseTranslateSourceLanguage').value);
+    userSettingsInstance.pauseTranslateTargetLanguage(context.querySelector('#selectPauseTranslateTargetLanguage').value);
 
     return apiClient.updateUserConfiguration(user.Id, user.Configuration);
 }
