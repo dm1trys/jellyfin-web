@@ -177,15 +177,5 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
 }
 
 export const bindPauseTranslateSubscriber = (playbackManager: PlaybackManager) => {
-    const subscriber = new PauseTranslateSubscriber(playbackManager);
-    const eventTarget = playbackManager as PlaybackManager & {
-        addEventListener: (eventName: string, listener: EventListener) => void
-    };
-
-    eventTarget.addEventListener('playerchange', subscriber.onPlayerChange.bind(subscriber));
-    eventTarget.addEventListener('pause', subscriber.onPlayerPause.bind(subscriber));
-    eventTarget.addEventListener('playbackstop', subscriber.onPlayerPlaybackStop.bind(subscriber));
-    eventTarget.addEventListener('stopped', subscriber.onPlayerStopped.bind(subscriber));
-    eventTarget.addEventListener('timeupdate', subscriber.onPlayerTimeUpdate.bind(subscriber));
-    eventTarget.addEventListener('unpause', subscriber.onPlayerUnpause.bind(subscriber));
+    return new PauseTranslateSubscriber(playbackManager);
 };

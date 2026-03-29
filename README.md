@@ -81,14 +81,78 @@ This fork includes a custom pause-translate experience for subtitle learning.
 - Legacy compatibility import remains in `src/apps/stable/features/playback/utils/pauseTranslateSubscriber.ts`
 - Local Windows helper to start the standard Jellyfin backend and the custom built web client lives in `tools/windows/start-jellyfin-with-custom-webdir.ps1`
 
-Typical local flow:
+## Windows Quick Start
+
+### Requirements
+
+- Node.js installed
+- Jellyfin Server installed on Windows
+- Jellyfin Windows service available as `JellyfinServer`
+
+### Build the custom web client
+
+From the repository root:
 
 ```sh
 npm run build:production
 ```
 
-Then on Windows:
+### Start Jellyfin + custom web client
+
+Run:
 
 ```powershell
 .\tools\windows\start-jellyfin-with-custom-webdir.ps1
 ```
+
+This starts or reuses:
+
+- standard Jellyfin backend on `http://127.0.0.1:8096`
+- custom web client with pause-translate on `http://127.0.0.1:8097`
+
+Open this URL in the browser:
+
+```text
+http://127.0.0.1:8097
+```
+
+Do not use `8096` if you want the custom subtitle translation UI. `8096` is the normal Jellyfin backend. `8097` is the custom web client from this fork.
+
+### Typical usage
+
+1. Open `http://127.0.0.1:8097`
+2. Sign in to your Jellyfin server
+3. Start a video with subtitles
+4. Pause playback
+5. The overlay shows:
+phrase translation, clickable words, and a word inspector with lemma, part of speech, translation variants, and German grammar tags.
+
+### Language settings
+
+Inside Jellyfin Web:
+
+1. Go to `Settings`
+2. Open `Subtitles`
+3. Set:
+`Pause Translate Source Language` and `Pause Translate Target Language`.
+
+For German learning, set source language to `de`.
+
+### If it does not work
+
+- Check that Jellyfin backend is listening on `8096`
+- Check that the custom web client is listening on `8097`
+- Rebuild after code changes:
+
+```sh
+npm run build:production
+```
+
+- Then start again:
+
+```powershell
+.\tools\windows\start-jellyfin-with-custom-webdir.ps1
+```
+
+- Web client logs:
+`.runtime-web/stdout.log` and `.runtime-web/stderr.log`
