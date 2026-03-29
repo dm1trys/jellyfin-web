@@ -15,6 +15,29 @@ type MockWordEntry = {
     translations: string[]
 };
 
+type WiktApiSense = {
+    glosses?: string[]
+};
+
+type WiktApiTranslation = {
+    lang_code?: string
+    word?: string
+};
+
+type WiktApiForm = {
+    form?: string
+    article?: string
+    tags?: string[]
+};
+
+type WiktApiEntry = {
+    word?: string
+    pos?: string
+    senses?: WiktApiSense[]
+    translations?: WiktApiTranslation[]
+    forms?: WiktApiForm[]
+};
+
 const normalizeSubtitleText = (text: string) => text
     .replace(/<[^>]+>/g, ' ')
     .replace(/\r/g, '')
@@ -66,6 +89,25 @@ const buildMockWordEntry = (word: string): MockWordEntry => {
             `${normalized} (literal)`
         ]
     };
+};
+
+const uniqueValues = (values: Array<string | undefined | null>) => values
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value, index, list) => list.indexOf(value) === index);
+
+const getFirstGloss = (entry?: WiktApiEntry) => entry?.senses
+    ?.flatMap((sense) => sense.glosses || [])
+    ?.find(Boolean);
+
+const getGermanLemma = (entry: WiktApiEntry, normalizedWord: string) => {
+    const lemma = entry.word || normalizedWord;
+    const article = entry.forms
+        ?.find((form) => form.tags?.includes('nominative') && form.tags?.includes('singular') && form.article)
+        ?.article;
+
+    return article ? `${article} ${lemma}` : lemma;
 };
 
 class PauseTranslateSubscriber extends PlaybackSubscriber {
@@ -258,6 +300,10 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
         const normalizedWord = word.toLowerCase();
         const translationVariantsPromise = this.fetchTranslationVariants(normalizedWord, sourceLanguage, targetLanguage);
 
+        if (sourceLanguage === 'de') {
+            return this.fetchGermanWordInspectorEntry(normalizedWord, targetLanguage, translationVariantsPromise);
+        }
+
         if (sourceLanguage !== 'en') {
             const fallbackEntry = buildMockWordEntry(normalizedWord);
             const translations = await translationVariantsPromise;
@@ -287,6 +333,47 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
         };
     }
 
+    private async fetchGermanWordInspectorEntry(
+        normalizedWord: string,
+        targetLanguage: string,
+        translationVariantsPromise: Promise<string[]>
+    ) {
+        const response = await fetch(`https://api.wiktapi.dev/v1/de/word/${encodeURIComponent(normalizedWord)}?lang=de`);
+        if (!response.ok) {
+            const fallbackEntry = buildMockWordEntry(normalizedWord);
+            const translations = await translationVariantsPromise;
+            fallbackEntry.translations = translations.length ? translations : fallbackEntry.translations;
+            return fallbackEntry;
+        }
+
+        const payload = await response.json();
+        const entry = (payload?.entries || []).find((candidate: WiktApiEntry) => candidate?.pos && candidate?.senses?.length) as WiktApiEntry | undefined;
+        if (!entry) {
+            const fallbackEntry = buildMockWordEntry(normalizedWord);
+            const translations = await translationVariantsPromise;
+            fallbackEntry.translations = translations.length ? translations : fallbackEntry.translations;
+            return fallbackEntry;
+        }
+
+        const glossaryTranslations = uniqueValues(
+            (entry.translations || [])
+                .filter((translation) => translation.lang_code === targetLanguage)
+                .map((translation) => translation.word)
+        );
+        const networkTranslations = await translationVariantsPromise;
+        const translations = uniqueValues([
+            ...glossaryTranslations,
+            ...networkTranslations
+        ]).slice(0, 5);
+
+        return {
+            lemma: getGermanLemma(entry, normalizedWord),
+            partOfSpeech: entry.pos || inferPartOfSpeech(normalizedWord),
+            contextualMeaning: getFirstGloss(entry) || `Kontextbedeutung: ${titleCase(normalizedWord)}`,
+            translations: translations.length ? translations : buildMockWordEntry(normalizedWord).translations
+        };
+    }
+
     private async fetchTranslationVariants(word: string, sourceLanguage: string, targetLanguage: string) {
         const url = new URL('https://api.mymemory.translated.net/get');
         url.searchParams.set('q', word);
@@ -298,14 +385,10 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
         }
 
         const payload = await response.json();
-        const variants = [
+        const variants = uniqueValues([
             payload?.responseData?.translatedText,
             ...(payload?.matches || []).map((match: { translation?: string }) => match.translation)
-        ]
-            .filter(Boolean)
-            .map((value: string) => value.trim())
-            .filter((value: string, index: number, list: string[]) => list.indexOf(value) === index)
-            .slice(0, 5);
+        ]).slice(0, 5);
 
         return variants;
     }
