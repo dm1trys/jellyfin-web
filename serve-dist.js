@@ -572,26 +572,40 @@ const fetchGermanWordEntry = async (word, targetLanguage, phrase) => {
 
 const buildInspectorByWord = async (tokens, phrase, sourceLanguage, targetLanguage) => {
     const inspectorByWord = {};
+    const uniqueKeys = [];
 
     for (const token of tokens) {
         const key = token.toLowerCase();
-        if (inspectorByWord[key]) {
-            continue;
-        }
-
-        try {
-            if (sourceLanguage === 'de') {
-                inspectorByWord[key] = await fetchGermanWordEntry(key, targetLanguage, phrase);
-            } else {
-                const fallbackEntry = buildFallbackWordEntry(key);
-                const translations = await fetchTranslationVariants(key, sourceLanguage, targetLanguage);
-                fallbackEntry.translations = translations.length ? translations : fallbackEntry.translations;
-                inspectorByWord[key] = fallbackEntry;
-            }
-        } catch (error) {
-            inspectorByWord[key] = buildFallbackWordEntry(key);
+        if (!uniqueKeys.includes(key)) {
+            uniqueKeys.push(key);
         }
     }
+
+    const concurrency = 4;
+    let cursor = 0;
+    const worker = async () => {
+        while (cursor < uniqueKeys.length) {
+            const currentIndex = cursor++;
+            const key = uniqueKeys[currentIndex];
+
+            try {
+                if (sourceLanguage === 'de') {
+                    inspectorByWord[key] = await fetchGermanWordEntry(key, targetLanguage, phrase);
+                } else {
+                    const fallbackEntry = buildFallbackWordEntry(key);
+                    const translations = await fetchTranslationVariants(key, sourceLanguage, targetLanguage);
+                    fallbackEntry.translations = translations.length ? translations : fallbackEntry.translations;
+                    inspectorByWord[key] = fallbackEntry;
+                }
+            } catch (error) {
+                inspectorByWord[key] = buildFallbackWordEntry(key);
+            }
+        }
+    };
+
+    await Promise.all(
+        Array.from({ length: Math.min(concurrency, uniqueKeys.length) }, () => worker())
+    );
 
     return inspectorByWord;
 };
@@ -635,13 +649,23 @@ const sendFile = (response, filePath) => {
     });
 };
 
+const getPauseTranslateRequestParams = (body) => {
+    const phrase = normalizeSubtitleText(toTrimmedString(body.phrase));
+    const sourceLanguage = toTrimmedString(body.sourceLanguage) || 'en';
+    const targetLanguage = toTrimmedString(body.targetLanguage) || 'uk';
+
+    return {
+        phrase,
+        sourceLanguage,
+        targetLanguage
+    };
+};
+
 http.createServer(async (request, response) => {
-    if (request.method === 'POST' && request.url === '/api/pause-translate/analyze') {
+    if (request.method === 'POST' && request.url === '/api/pause-translate/translate') {
         try {
             const body = await readJsonBody(request);
-            const phrase = normalizeSubtitleText(toTrimmedString(body.phrase));
-            const sourceLanguage = toTrimmedString(body.sourceLanguage) || 'en';
-            const targetLanguage = toTrimmedString(body.targetLanguage) || 'uk';
+            const { phrase, sourceLanguage, targetLanguage } = getPauseTranslateRequestParams(body);
 
             if (!phrase) {
                 sendJson(response, 400, { error: 'Phrase is required' });
@@ -650,11 +674,33 @@ http.createServer(async (request, response) => {
 
             const tokens = tokenizeWords(phrase);
             const translatedText = await fetchTranslationText(phrase, sourceLanguage, targetLanguage);
-            const inspectorByWord = await buildInspectorByWord(tokens, phrase, sourceLanguage, targetLanguage);
 
             sendJson(response, 200, {
                 translatedText,
-                tokens,
+                tokens
+            });
+        } catch (error) {
+            sendJson(response, 502, {
+                error: error instanceof Error ? error.message : 'Pause translate preview failed'
+            });
+        }
+        return;
+    }
+
+    if (request.method === 'POST' && request.url === '/api/pause-translate/inspect') {
+        try {
+            const body = await readJsonBody(request);
+            const { phrase, sourceLanguage, targetLanguage } = getPauseTranslateRequestParams(body);
+
+            if (!phrase) {
+                sendJson(response, 400, { error: 'Phrase is required' });
+                return;
+            }
+
+            const tokens = tokenizeWords(phrase);
+            const inspectorByWord = await buildInspectorByWord(tokens, phrase, sourceLanguage, targetLanguage);
+
+            sendJson(response, 200, {
                 inspectorByWord
             });
         } catch (error) {
@@ -662,6 +708,11 @@ http.createServer(async (request, response) => {
                 error: error instanceof Error ? error.message : 'Pause translate analysis failed'
             });
         }
+        return;
+    }
+
+    if ((request.url || '').startsWith('/api/')) {
+        sendJson(response, 404, { error: 'Not found' });
         return;
     }
 

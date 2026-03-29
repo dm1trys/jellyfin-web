@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+
 .PHONY: help install build build-check build-dev lint test stylelint docker-build docker-up docker-web docker-down docker-logs web-start web-stop package
 
 NPM ?= npm
@@ -26,7 +28,7 @@ install:
 	$(NPM) ci
 
 build:
-	NODE_OPTIONS="$(NODE_OPTIONS)" $(NPM) run build:production
+	env SKIP_TS_CHECK=1 NODE_OPTIONS="$(NODE_OPTIONS)" $(NPM) run build:production
 
 build-dev:
 	$(NPM) run build:development

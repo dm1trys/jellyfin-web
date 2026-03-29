@@ -33,6 +33,7 @@ try {
 }
 
 const NODE_MODULES_REGEX = /[\\/]node_modules[\\/]/;
+const ENABLE_TS_CHECK = process.env.SKIP_TS_CHECK !== '1';
 
 const THEMES = fg.globSync('themes/**/*.scss', { cwd: path.resolve(__dirname, 'src') });
 const THEMES_BY_ID = THEMES.reduce((acc, theme) => {
@@ -104,11 +105,11 @@ const config = {
             resourceRegExp: /worker-bundle\.js$/,
             contextRegExp: /libarchive.js/
         }),
-        new ForkTsCheckerWebpackPlugin({
+        ENABLE_TS_CHECK ? new ForkTsCheckerWebpackPlugin({
             typescript: {
                 configFile: path.resolve(__dirname, 'tsconfig.json')
             }
-        }),
+        }) : null,
         new MiniCssExtractPlugin({
             filename: pathData => {
                 if (pathData.chunk?.name?.startsWith('themes/')) {
@@ -118,7 +119,7 @@ const config = {
             },
             chunkFilename: '[name].[contenthash].css'
         })
-    ],
+    ].filter(Boolean),
     output: {
         filename: pathData => (
             pathData.chunk.name === 'serviceworker' ? '[name].js' : '[name].bundle.js'

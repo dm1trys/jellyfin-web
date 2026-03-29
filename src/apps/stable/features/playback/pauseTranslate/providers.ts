@@ -1,4 +1,4 @@
-import type { PauseTranslateAnalysis } from './types';
+import type { PauseTranslateInspector, PauseTranslatePreview } from './types';
 
 const LOOKUP_TIMEOUT_MS = 8000;
 
@@ -14,12 +14,12 @@ const fetchJsonWithTimeout = async (url: string, options?: RequestInit) => {
     }
 };
 
-export const analyzePauseTranslation = async (
+export const fetchPauseTranslationPreview = async (
     phrase: string,
     sourceLanguage: string,
     targetLanguage: string
 ) => {
-    const request = await fetchJsonWithTimeout('/api/pause-translate/analyze', {
+    const request = await fetchJsonWithTimeout('/api/pause-translate/translate', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -31,8 +31,31 @@ export const analyzePauseTranslation = async (
         })
     });
     if (!request.ok) {
-        throw new Error(`Pause translate analysis failed with ${request.status}`);
+        throw new Error(`Pause translate preview failed with ${request.status}`);
     }
 
-    return request.json() as Promise<PauseTranslateAnalysis>;
+    return request.json() as Promise<PauseTranslatePreview>;
+};
+
+export const fetchPauseTranslationInspector = async (
+    phrase: string,
+    sourceLanguage: string,
+    targetLanguage: string
+) => {
+    const request = await fetchJsonWithTimeout('/api/pause-translate/inspect', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            phrase,
+            sourceLanguage,
+            targetLanguage
+        })
+    });
+    if (!request.ok) {
+        throw new Error(`Pause translate inspector failed with ${request.status}`);
+    }
+
+    return request.json() as Promise<PauseTranslateInspector>;
 };

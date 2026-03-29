@@ -4,9 +4,9 @@ import { currentSettings } from 'scripts/settings/userSettings';
 
 import { PlaybackSubscriber } from '../utils/playbackSubscriber';
 import { PauseTranslateOverlay } from './overlay';
-import { analyzePauseTranslation } from './providers';
+import { fetchPauseTranslationInspector, fetchPauseTranslationPreview } from './providers';
 import { normalizeSubtitleText, tokenizeWords } from './text';
-import type { PauseTranslateAnalysis } from './types';
+import type { PauseTranslateInspector, PauseTranslatePreview } from './types';
 
 const getSourceLanguage = () => {
     const language = currentSettings.pauseTranslateSourceLanguage();
@@ -20,12 +20,13 @@ const getTargetLanguage = () => {
 
 class PauseTranslateSubscriber extends PlaybackSubscriber {
     private readonly overlay: PauseTranslateOverlay;
-    private analysisCache = new Map<string, PauseTranslateAnalysis>();
+    private previewCache = new Map<string, PauseTranslatePreview>();
+    private inspectorCache = new Map<string, PauseTranslateInspector>();
     private lastVisibleSubtitleText = '';
     private lastRenderedSubtitleText = '';
     private activeRequestId = 0;
     private selectedWord?: string;
-    private currentAnalysis?: PauseTranslateAnalysis;
+    private currentInspector?: PauseTranslateInspector;
 
     constructor(playbackManager: PlaybackManager) {
         super(playbackManager);
@@ -45,13 +46,13 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
             return;
         }
 
-        const entry = this.currentAnalysis?.inspectorByWord[this.selectedWord.toLowerCase()];
+        const entry = this.currentInspector?.inspectorByWord[this.selectedWord.toLowerCase()];
         if (entry) {
             this.overlay.renderInspectorEntry(entry);
             return;
         }
 
-        this.overlay.renderInspectorError(this.selectedWord, 'Word details could not be loaded right now.');
+        this.overlay.renderInspectorLoading(this.selectedWord);
     }
 
     private getVisibleSubtitleText(player?: PlayerPlugin) {
@@ -85,27 +86,51 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
         this.overlay.renderInspectorLoading(this.selectedWord || '');
 
         try {
-            const analysis = this.analysisCache.has(cacheKey)
-                ? this.analysisCache.get(cacheKey) as PauseTranslateAnalysis
-                : await analyzePauseTranslation(subtitleText, sourceLanguage, targetLanguage);
+            const preview = this.previewCache.has(cacheKey)
+                ? this.previewCache.get(cacheKey) as PauseTranslatePreview
+                : await fetchPauseTranslationPreview(subtitleText, sourceLanguage, targetLanguage);
             if (requestId !== this.activeRequestId) {
                 return;
             }
 
-            this.analysisCache.set(cacheKey, analysis);
-            this.currentAnalysis = analysis;
-            this.overlay.show(subtitleText, analysis.translatedText, 'ready');
+            this.previewCache.set(cacheKey, preview);
+            this.currentInspector = this.inspectorCache.get(cacheKey);
+            this.overlay.show(subtitleText, preview.translatedText, 'ready');
             this.overlay.setSelectedWord(this.selectedWord);
             this.renderWordInspector();
         } catch (error) {
-            console.error('[PauseTranslateSubscriber] analysis error', error);
+            console.error('[PauseTranslateSubscriber] translation error', error);
             if (requestId !== this.activeRequestId) {
                 return;
             }
 
-            this.currentAnalysis = undefined;
+            this.currentInspector = undefined;
             this.overlay.show(subtitleText, 'Could not translate this subtitle right now.', 'error');
             this.overlay.setSelectedWord(this.selectedWord);
+            if (this.selectedWord) {
+                this.overlay.renderInspectorError(this.selectedWord, 'Word details could not be loaded right now.');
+            }
+            return;
+        }
+
+        try {
+            const inspector = this.inspectorCache.has(cacheKey)
+                ? this.inspectorCache.get(cacheKey) as PauseTranslateInspector
+                : await fetchPauseTranslationInspector(subtitleText, sourceLanguage, targetLanguage);
+            if (requestId !== this.activeRequestId) {
+                return;
+            }
+
+            this.inspectorCache.set(cacheKey, inspector);
+            this.currentInspector = inspector;
+            this.renderWordInspector();
+        } catch (error) {
+            console.error('[PauseTranslateSubscriber] inspector error', error);
+            if (requestId !== this.activeRequestId) {
+                return;
+            }
+
+            this.currentInspector = undefined;
             if (this.selectedWord) {
                 this.overlay.renderInspectorError(this.selectedWord, 'Word details could not be loaded right now.');
             }
@@ -124,7 +149,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
     onPlayerChange() {
         this.lastVisibleSubtitleText = '';
         this.lastRenderedSubtitleText = '';
-        this.currentAnalysis = undefined;
+        this.currentInspector = undefined;
         this.selectedWord = undefined;
         this.hideOverlay();
     }
@@ -137,7 +162,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
     onPlayerPlaybackStop() {
         this.lastVisibleSubtitleText = '';
         this.lastRenderedSubtitleText = '';
-        this.currentAnalysis = undefined;
+        this.currentInspector = undefined;
         this.selectedWord = undefined;
         this.hideOverlay();
     }
@@ -145,7 +170,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
     onPlayerStopped() {
         this.lastVisibleSubtitleText = '';
         this.lastRenderedSubtitleText = '';
-        this.currentAnalysis = undefined;
+        this.currentInspector = undefined;
         this.selectedWord = undefined;
         this.hideOverlay();
     }
@@ -164,7 +189,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
 
     onPlayerUnpause() {
         this.lastRenderedSubtitleText = '';
-        this.currentAnalysis = undefined;
+        this.currentInspector = undefined;
         this.selectedWord = undefined;
         this.hideOverlay();
     }

@@ -8,9 +8,12 @@ export type WordInspectorEntry = {
     grammarTags?: string[]
 };
 
-export type PauseTranslateAnalysis = {
+export type PauseTranslatePreview = {
     translatedText: string
     tokens: string[]
+};
+
+export type PauseTranslateInspector = {
     inspectorByWord: Record<string, WordInspectorEntry>
 };
 
