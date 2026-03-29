@@ -174,6 +174,22 @@ video[controls]::-webkit-media-controls {
     font-size: 0.95rem;
 }
 
+.pauseTranslateOverlay-inspector-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.65rem;
+}
+
+.pauseTranslateOverlay-meta-chip {
+    padding: 0.25rem 0.55rem;
+    border-radius: 999px;
+    background: rgba(134, 239, 172, 0.14);
+    color: #86efac;
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
+}
+
 .pauseTranslateOverlay-inspector-translations {
     display: flex;
     flex-wrap: wrap;

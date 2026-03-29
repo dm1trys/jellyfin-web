@@ -13,10 +13,15 @@ type MockWordEntry = {
     partOfSpeech: string
     contextualMeaning: string
     translations: string[]
+    grammarTags?: string[]
 };
 
 type WiktApiSense = {
     glosses?: string[]
+    tags?: string[]
+    form_of?: Array<{
+        word?: string
+    }>
 };
 
 type WiktApiTranslation = {
@@ -110,6 +115,61 @@ const getGermanLemma = (entry: WiktApiEntry, normalizedWord: string) => {
     return article ? `${article} ${lemma}` : lemma;
 };
 
+const getGermanPluralForm = (entry: WiktApiEntry) => entry.forms
+    ?.find((form) => form.tags?.includes('nominative') && form.tags?.includes('plural'))
+    ?.form;
+
+const getGermanBaseWord = (entry?: WiktApiEntry) => entry?.senses
+    ?.flatMap((sense) => sense.form_of || [])
+    ?.map((candidate) => candidate.word)
+    ?.find(Boolean);
+
+const formatGermanGrammarTag = (tag: string) => {
+    const labels: Record<string, string> = {
+        active: 'Aktiv',
+        dative: 'Dativ',
+        'form-of': 'Form',
+        genitive: 'Genitiv',
+        imperative: 'Imperativ',
+        indicative: 'Indikativ',
+        nominative: 'Nominativ',
+        past: 'Prateritum',
+        perfect: 'Perfekt',
+        plural: 'Plural',
+        present: 'Prasens',
+        singular: 'Singular'
+    };
+
+    return labels[tag] || titleCase(tag);
+};
+
+const getGermanGrammarTags = (entry: WiktApiEntry, sourceEntry?: WiktApiEntry) => {
+    const tags: string[] = [];
+    const article = entry.forms
+        ?.find((form) => form.tags?.includes('nominative') && form.tags?.includes('singular') && form.article)
+        ?.article;
+    const pluralForm = getGermanPluralForm(entry);
+    const sourceSense = sourceEntry?.senses?.[0];
+
+    if (article) {
+        tags.push(article);
+    }
+
+    if (pluralForm && pluralForm !== entry.word) {
+        tags.push(`Plural: ${pluralForm}`);
+    }
+
+    for (const tag of sourceSense?.tags || []) {
+        if (tag === 'form-of') {
+            continue;
+        }
+
+        tags.push(formatGermanGrammarTag(tag));
+    }
+
+    return uniqueValues(tags).slice(0, 6);
+};
+
 class PauseTranslateSubscriber extends PlaybackSubscriber {
     private overlay?: HTMLDivElement;
     private originalNode?: HTMLDivElement;
@@ -118,6 +178,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
     private inspectorNode?: HTMLDivElement;
     private inspectorWordNode?: HTMLDivElement;
     private inspectorPartOfSpeechNode?: HTMLDivElement;
+    private inspectorMetaNode?: HTMLDivElement;
     private inspectorContextNode?: HTMLDivElement;
     private inspectorTranslationsNode?: HTMLDivElement;
     private translationCache = new Map<string, string>();
@@ -158,6 +219,9 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
         this.inspectorPartOfSpeechNode = document.createElement('div');
         this.inspectorPartOfSpeechNode.className = `${OVERLAY_CLASS}-inspector-pos`;
 
+        this.inspectorMetaNode = document.createElement('div');
+        this.inspectorMetaNode.className = `${OVERLAY_CLASS}-inspector-meta`;
+
         this.inspectorContextNode = document.createElement('div');
         this.inspectorContextNode.className = `${OVERLAY_CLASS}-inspector-context`;
 
@@ -167,6 +231,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
         this.inspectorNode.append(
             this.inspectorWordNode,
             this.inspectorPartOfSpeechNode,
+            this.inspectorMetaNode,
             this.inspectorContextNode,
             this.inspectorTranslationsNode
         );
@@ -230,6 +295,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
             || !this.inspectorNode
             || !this.inspectorWordNode
             || !this.inspectorPartOfSpeechNode
+            || !this.inspectorMetaNode
             || !this.inspectorContextNode
             || !this.inspectorTranslationsNode
         ) {
@@ -241,6 +307,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
         this.inspectorNode.classList.remove('hide');
         this.inspectorWordNode.textContent = selectedWord.toLowerCase();
         this.inspectorPartOfSpeechNode.textContent = 'loading';
+        this.inspectorMetaNode.innerHTML = '';
         this.inspectorContextNode.textContent = 'Loading word details...';
         this.inspectorTranslationsNode.innerHTML = '';
         void this.loadWordInspectorEntry(selectedWord);
@@ -250,6 +317,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
         if (
             !this.inspectorWordNode
             || !this.inspectorPartOfSpeechNode
+            || !this.inspectorMetaNode
             || !this.inspectorContextNode
             || !this.inspectorTranslationsNode
         ) {
@@ -258,8 +326,16 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
 
         this.inspectorWordNode.textContent = entry.lemma;
         this.inspectorPartOfSpeechNode.textContent = entry.partOfSpeech;
+        this.inspectorMetaNode.innerHTML = '';
         this.inspectorContextNode.textContent = entry.contextualMeaning;
         this.inspectorTranslationsNode.innerHTML = '';
+
+        for (const grammarTag of entry.grammarTags || []) {
+            const chip = document.createElement('div');
+            chip.className = `${OVERLAY_CLASS}-meta-chip`;
+            chip.textContent = grammarTag;
+            this.inspectorMetaNode.appendChild(chip);
+        }
 
         for (const translation of entry.translations) {
             const chip = document.createElement('div');
@@ -338,16 +414,27 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
         targetLanguage: string,
         translationVariantsPromise: Promise<string[]>
     ) {
-        const response = await fetch(`https://api.wiktapi.dev/v1/de/word/${encodeURIComponent(normalizedWord)}?lang=de`);
-        if (!response.ok) {
+        const sourceResponse = await fetch(`https://api.wiktapi.dev/v1/de/word/${encodeURIComponent(normalizedWord)}?lang=de`);
+        if (!sourceResponse.ok) {
             const fallbackEntry = buildMockWordEntry(normalizedWord);
             const translations = await translationVariantsPromise;
             fallbackEntry.translations = translations.length ? translations : fallbackEntry.translations;
             return fallbackEntry;
         }
 
-        const payload = await response.json();
-        const entry = (payload?.entries || []).find((candidate: WiktApiEntry) => candidate?.pos && candidate?.senses?.length) as WiktApiEntry | undefined;
+        const sourcePayload = await sourceResponse.json();
+        const sourceEntry = (sourcePayload?.entries || []).find((candidate: WiktApiEntry) => candidate?.senses?.length) as WiktApiEntry | undefined;
+        const baseWord = getGermanBaseWord(sourceEntry);
+
+        let entry = (sourcePayload?.entries || []).find((candidate: WiktApiEntry) => candidate?.pos && candidate?.senses?.length) as WiktApiEntry | undefined;
+        if (baseWord && baseWord.toLowerCase() !== normalizedWord) {
+            const baseResponse = await fetch(`https://api.wiktapi.dev/v1/de/word/${encodeURIComponent(baseWord)}?lang=de`);
+            if (baseResponse.ok) {
+                const basePayload = await baseResponse.json();
+                entry = (basePayload?.entries || []).find((candidate: WiktApiEntry) => candidate?.pos && candidate?.senses?.length) as WiktApiEntry | undefined;
+            }
+        }
+
         if (!entry) {
             const fallbackEntry = buildMockWordEntry(normalizedWord);
             const translations = await translationVariantsPromise;
@@ -370,7 +457,8 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
             lemma: getGermanLemma(entry, normalizedWord),
             partOfSpeech: entry.pos || inferPartOfSpeech(normalizedWord),
             contextualMeaning: getFirstGloss(entry) || `Kontextbedeutung: ${titleCase(normalizedWord)}`,
-            translations: translations.length ? translations : buildMockWordEntry(normalizedWord).translations
+            translations: translations.length ? translations : buildMockWordEntry(normalizedWord).translations,
+            grammarTags: getGermanGrammarTags(entry, sourceEntry)
         };
     }
 
