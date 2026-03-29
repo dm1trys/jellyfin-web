@@ -21,6 +21,8 @@ services:
     environment:
       BIND_HOST: 0.0.0.0
       WEB_CLIENT_PORT: 8097
+      DEEPL_API_KEY: ${DEEPL_API_KEY:-}
+      DEEPL_API_URL: ${DEEPL_API_URL:-https://api-free.deepl.com/v2/translate}
     ports:
       - "8097:8097"
     restart: unless-stopped

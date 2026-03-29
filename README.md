@@ -261,6 +261,30 @@ Build the custom web client first:
 npm run build:production
 ```
 
+Optional for better phrase translation quality, configure DeepL before startup:
+
+```sh
+export DEEPL_API_KEY=your_deepl_api_key
+export DEEPL_API_URL=https://api-free.deepl.com/v2/translate
+```
+
+If you use DeepL Pro, set `DEEPL_API_URL` to the Pro translate endpoint instead of the free endpoint.
+
+You can also store these values in a local `.env` file for Docker Compose:
+
+```sh
+cp .env.example .env
+```
+
+Then edit `.env` and set:
+
+```dotenv
+DEEPL_API_KEY=your_deepl_api_key
+DEEPL_API_URL=https://api-free.deepl.com/v2/translate
+```
+
+`.env` is ignored by git and will be picked up automatically by `docker compose`.
+
 Start backend + custom web client:
 
 ```sh
@@ -289,4 +313,5 @@ Notes:
 
 - [`docker-compose.yml`](/home/dmitrys/work/jellyfin-web/docker-compose.yml) mounts `./media` into the backend container as `/media`
 - backend config and cache are stored in Docker volumes `jellyfin_config` and `jellyfin_cache`
+- phrase translation uses DeepL when `DEEPL_API_KEY` is set and falls back to MyMemory otherwise
 - if you rebuild the web client, run `docker compose up --build -d` again

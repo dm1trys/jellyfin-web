@@ -102,6 +102,9 @@ const toTrimmedString = (value) => (
     typeof value === 'string' ? value.trim() : ''
 );
 
+const deepLApiKey = toTrimmedString(process.env.DEEPL_API_KEY);
+const deepLApiUrl = toTrimmedString(process.env.DEEPL_API_URL) || 'https://api-free.deepl.com/v2/translate';
+
 const normalizeComparableText = (value) => toTrimmedString(value)
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
@@ -287,13 +290,112 @@ const fetchJson = (url) => new Promise((resolve, reject) => {
     request.on('error', reject);
 });
 
-const fetchTranslationText = async (text, sourceLanguage, targetLanguage) => {
+const postJson = (urlString, body, headers = {}) => new Promise((resolve, reject) => {
+    const url = new URL(urlString);
+    const payload = JSON.stringify(body);
+    const request = https.request({
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port,
+        path: `${url.pathname}${url.search}`,
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(payload),
+            'User-Agent': 'jellyfin-pause-translate-dev-server',
+            ...headers
+        }
+    }, (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => {
+            const rawBody = Buffer.concat(chunks).toString('utf8');
+            if (response.statusCode < 200 || response.statusCode >= 300) {
+                reject(new Error(`Request failed with ${response.statusCode}: ${urlString} ${rawBody}`));
+                return;
+            }
+
+            try {
+                resolve(JSON.parse(rawBody));
+            } catch (error) {
+                reject(error);
+            }
+        });
+    });
+
+    request.setTimeout(lookupTimeoutMs, () => {
+        request.destroy(new Error(`Request timed out: ${urlString}`));
+    });
+    request.on('error', reject);
+    request.write(payload);
+    request.end();
+});
+
+const toDeepLLanguageCode = (language) => {
+    const normalized = toTrimmedString(language).replace('-', '_').toUpperCase();
+    if (!normalized) {
+        return '';
+    }
+
+    if (normalized === 'EN_GB' || normalized === 'EN_US') {
+        return normalized;
+    }
+
+    const [baseLanguage] = normalized.split('_');
+    return baseLanguage;
+};
+
+const fetchTranslationTextWithMyMemory = async (text, sourceLanguage, targetLanguage) => {
     const url = new URL('https://api.mymemory.translated.net/get');
     url.searchParams.set('q', text);
     url.searchParams.set('langpair', `${sourceLanguage}|${targetLanguage}`);
 
     const payload = await fetchJson(url.toString());
     return getPreferredTranslation(text, sourceLanguage, targetLanguage, payload);
+};
+
+const fetchTranslationTextWithDeepL = async (text, sourceLanguage, targetLanguage) => {
+    if (!deepLApiKey) {
+        return null;
+    }
+
+    const sourceLang = toDeepLLanguageCode(sourceLanguage);
+    const targetLang = toDeepLLanguageCode(targetLanguage);
+    if (!sourceLang || !targetLang || sourceLang === targetLang) {
+        return null;
+    }
+
+    const payload = await postJson(
+        deepLApiUrl,
+        {
+            text: [text],
+            source_lang: sourceLang,
+            target_lang: targetLang
+        },
+        {
+            Authorization: `DeepL-Auth-Key ${deepLApiKey}`
+        }
+    );
+
+    const translatedText = maybeRepairMojibake(payload?.translations?.[0]?.text);
+    return translatedText && !isEffectivelySameText(text, translatedText) ? translatedText : null;
+};
+
+const fetchTranslationText = async (text, sourceLanguage, targetLanguage) => {
+    if (sourceLanguage === targetLanguage) {
+        return text;
+    }
+
+    try {
+        const deepLTranslation = await fetchTranslationTextWithDeepL(text, sourceLanguage, targetLanguage);
+        if (deepLTranslation) {
+            return deepLTranslation;
+        }
+    } catch (error) {
+        // Fall back to MyMemory when DeepL is unavailable or the language pair is unsupported.
+    }
+
+    return fetchTranslationTextWithMyMemory(text, sourceLanguage, targetLanguage);
 };
 
 const fetchTranslationVariants = async (word, sourceLanguage, targetLanguage) => {

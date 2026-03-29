@@ -20,6 +20,7 @@ config.json
 .direnv/
 
 # environment related
+.env
 .envrc
 .runtime/
 .runtime-web/
