@@ -1,0 +1,30 @@
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin-backend
+    ports:
+      - "8096:8096"
+      - "8920:8920"
+    volumes:
+      - jellyfin_config:/config
+      - jellyfin_cache:/cache
+      - ./media:/media
+    restart: unless-stopped
+
+  jellyfin-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: jellyfin-web
+    depends_on:
+      - jellyfin
+    environment:
+      BIND_HOST: 0.0.0.0
+      WEB_CLIENT_PORT: 8097
+    ports:
+      - "8097:8097"
+    restart: unless-stopped
+
+volumes:
+  jellyfin_config:
+  jellyfin_cache:

@@ -108,19 +108,19 @@ Run:
 This starts or reuses:
 
 - standard Jellyfin backend on `http://127.0.0.1:8096`
-- custom web client with pause-translate on `http://127.0.0.1:8097`
+- custom web client with pause-translate on `http://0.0.0.0:8097`
 
 Open this URL in the browser:
 
 ```text
-http://127.0.0.1:8097
+http://0.0.0.0:8097
 ```
 
-Do not use `8096` if you want the custom subtitle translation UI. `8096` is the normal Jellyfin backend. `8097` is the custom web client from this fork.
+Do not use `8096` if you want the custom subtitle translation UI. `8096` is the normal Jellyfin backend. `8097` is the custom web client from this fork, bound to `0.0.0.0`.
 
 ### Typical usage
 
-1. Open `http://127.0.0.1:8097`
+1. Open `http://0.0.0.0:8097`
 2. Sign in to your Jellyfin server
 3. Start a video with subtitles
 4. Pause playback
@@ -156,3 +156,137 @@ npm run build:production
 
 - Web client logs:
 `.runtime-web/stdout.log` and `.runtime-web/stderr.log`
+
+## Linux Quick Start
+
+### Requirements
+
+- Node.js installed
+- Jellyfin Server installed and reachable on `http://127.0.0.1:8096`
+- `ss` available (from `iproute2`, present on most Linux distributions)
+
+### Build the custom web client
+
+From the repository root:
+
+```sh
+npm run build:production
+```
+
+### Package the build
+
+```sh
+tar -C . -czf jellyfin-web-linux-build.tar.gz dist
+```
+
+### Start the Jellyfin backend
+
+Start Jellyfin by your usual method.
+
+Check that the backend is listening on `8096`:
+
+```sh
+ss -ltn '( sport = :8096 )'
+```
+
+Open the backend directly if you want to verify it first:
+
+```text
+http://127.0.0.1:8096
+```
+
+Make sure port `8096` is listening before starting the custom web client.
+
+### Start Jellyfin + custom web client
+
+Make the helper executable once:
+
+```sh
+chmod +x tools/linux/start-jellyfin-with-custom-webdir.sh tools/linux/stop-web-client.sh
+```
+
+Run:
+
+```sh
+./tools/linux/start-jellyfin-with-custom-webdir.sh
+```
+
+The helper:
+
+- waits for Jellyfin backend on `127.0.0.1:8096`
+- starts the custom web client on `0.0.0.0:8097`
+- writes logs to `.runtime-web/stdout.log` and `.runtime-web/stderr.log`
+
+This expects:
+
+- standard Jellyfin backend on `http://127.0.0.1:8096`
+- custom web client on `http://0.0.0.0:8097`
+
+### Full startup sequence
+
+```sh
+ss -ltn '( sport = :8096 )'
+./tools/linux/start-jellyfin-with-custom-webdir.sh
+ss -ltn '( sport = :8097 )'
+```
+
+Open:
+
+```text
+http://0.0.0.0:8097
+```
+
+### Stop the custom web client
+
+```sh
+./tools/linux/stop-web-client.sh
+```
+
+### Logs
+
+- `.runtime-web/stdout.log`
+- `.runtime-web/stderr.log`
+
+## Docker Compose
+
+### Requirements
+
+- Docker
+- Docker Compose
+- built web client in [`dist`](/home/dmitrys/work/jellyfin-web/dist)
+
+Build the custom web client first:
+
+```sh
+npm run build:production
+```
+
+Start backend + custom web client:
+
+```sh
+docker compose up --build -d
+```
+
+This starts:
+
+- Jellyfin backend on `http://127.0.0.1:8096`
+- custom web client on `http://127.0.0.1:8097`
+
+Stop everything:
+
+```sh
+docker compose down
+```
+
+Useful commands:
+
+```sh
+docker compose logs -f jellyfin
+docker compose logs -f jellyfin-web
+```
+
+Notes:
+
+- [`docker-compose.yml`](/home/dmitrys/work/jellyfin-web/docker-compose.yml) mounts `./media` into the backend container as `/media`
+- backend config and cache are stored in Docker volumes `jellyfin_config` and `jellyfin_cache`
+- if you rebuild the web client, run `docker compose up --build -d` again
