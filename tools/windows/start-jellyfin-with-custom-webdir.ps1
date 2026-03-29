@@ -1,45 +1,43 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$distDir = Join-Path $repoRoot "dist"
-$runtimeRoot = Join-Path $repoRoot ".runtime-jellyfin"
-$dataDir = Join-Path $runtimeRoot "data"
-$configDir = Join-Path $runtimeRoot "config"
-$cacheDir = Join-Path $runtimeRoot "cache"
-$logDir = Join-Path $runtimeRoot "log"
-$stdoutLog = Join-Path $logDir "stdout.log"
-$stderrLog = Join-Path $logDir "stderr.log"
-$jellyfinExe = "C:\Program Files\Jellyfin\Server\jellyfin.exe"
-$port = 8097
+$webClientScript = Join-Path $repoRoot "start-web-client.ps1"
+$jellyfinServiceName = "JellyfinServer"
+$backendPort = 8096
+$webClientPort = 8097
 
-if (-not (Test-Path $jellyfinExe)) {
-    throw "Jellyfin is not installed at $jellyfinExe"
+if (-not (Test-Path (Join-Path $repoRoot "dist\\index.html"))) {
+    throw "Build output not found in $repoRoot\\dist. Run 'npm run build:production' first."
 }
 
-if (-not (Test-Path (Join-Path $distDir "index.html"))) {
-    throw "Build output not found in $distDir. Run 'npm run build:production' first."
+$backendListening = Get-NetTCPConnection -LocalPort $backendPort -State Listen -ErrorAction SilentlyContinue
+if (-not $backendListening) {
+    $service = Get-Service -Name $jellyfinServiceName -ErrorAction SilentlyContinue
+    if (-not $service) {
+        throw "Jellyfin service '$jellyfinServiceName' was not found. Install/start Jellyfin first."
+    }
+
+    if ($service.Status -ne 'Running') {
+        Start-Service -Name $jellyfinServiceName
+    }
+
+    $deadline = (Get-Date).AddSeconds(25)
+    do {
+        Start-Sleep -Seconds 1
+        $backendListening = Get-NetTCPConnection -LocalPort $backendPort -State Listen -ErrorAction SilentlyContinue
+    } while (-not $backendListening -and (Get-Date) -lt $deadline)
+
+    if (-not $backendListening) {
+        throw "Jellyfin backend did not start on port $backendPort."
+    }
 }
 
-foreach ($path in @($dataDir, $configDir, $cacheDir, $logDir)) {
-    New-Item -ItemType Directory -Force -Path $path | Out-Null
+& $webClientScript | Out-Null
+
+$webClientListening = Get-NetTCPConnection -LocalPort $webClientPort -State Listen -ErrorAction SilentlyContinue
+if (-not $webClientListening) {
+    throw "Custom web client did not start on port $webClientPort."
 }
 
-$existing = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-if ($existing) {
-    Write-Output "A Jellyfin instance already appears to be listening on port $port."
-    exit 0
-}
-
-$env:ASPNETCORE_URLS = "http://127.0.0.1:$port"
-
-$arguments = @(
-    "--datadir", $dataDir,
-    "--configdir", $configDir,
-    "--cachedir", $cacheDir,
-    "--logdir", $logDir,
-    "--webdir", $distDir,
-    "--published-server-url", "http://127.0.0.1:$port"
-)
-
-$process = Start-Process -FilePath $jellyfinExe -ArgumentList $arguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
-Write-Output "Started Jellyfin with custom webdir on http://127.0.0.1:$port (PID $($process.Id))"
+Write-Output "Backend: http://127.0.0.1:$backendPort"
+Write-Output "Custom web client: http://127.0.0.1:$webClientPort"

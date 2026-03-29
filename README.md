@@ -79,7 +79,7 @@ This fork includes a custom pause-translate experience for subtitle learning.
 
 - Main feature code lives in `src/apps/stable/features/playback/pauseTranslate/`
 - Legacy compatibility import remains in `src/apps/stable/features/playback/utils/pauseTranslateSubscriber.ts`
-- Local Windows helper to run Jellyfin against the built fork lives in `tools/windows/start-jellyfin-with-custom-webdir.ps1`
+- Local Windows helper to start the standard Jellyfin backend and the custom built web client lives in `tools/windows/start-jellyfin-with-custom-webdir.ps1`
 
 Typical local flow:
 
