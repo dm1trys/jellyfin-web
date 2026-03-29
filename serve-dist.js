@@ -41,6 +41,7 @@ const safeResolve = (requestPath) => {
 const normalizeSubtitleText = (text) => text
     .replace(/<[^>]+>/g, ' ')
     .replace(/\r/g, '')
+    .replace(/[\u200E\u200F\u202A-\u202E]/g, '')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
@@ -49,7 +50,7 @@ const normalizeSubtitleText = (text) => text
     .trim();
 
 const tokenizeWords = (text) => (
-    text.match(/[A-Za-zÀ-ÖØ-öø-ÿĀ-žẞЀ-ӿ'-]+/g) || []
+    text.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) || []
 );
 
 const maybeRepairMojibake = (value) => {
@@ -68,6 +69,30 @@ const maybeRepairMojibake = (value) => {
     } catch (error) {
         return value;
     }
+};
+
+const decodeHtmlEntities = (value) => value
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, '\'')
+    .replace(/&#39;/gi, '\'')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, num) => String.fromCodePoint(parseInt(num, 10)));
+
+const normalizeFetchedText = (value) => {
+    const repaired = maybeRepairMojibake(value);
+    if (typeof repaired !== 'string') {
+        return repaired;
+    }
+
+    return decodeHtmlEntities(repaired)
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .normalize('NFC')
+        .trim();
 };
 
 const uniqueValues = (values) => values
@@ -117,8 +142,8 @@ const isEffectivelySameText = (left, right) => (
 
 const getPreferredTranslation = (sourceText, sourceLanguage, targetLanguage, payload) => {
     const candidates = uniqueValues([
-        maybeRepairMojibake(payload?.responseData?.translatedText),
-        ...(payload?.matches || []).map((match) => maybeRepairMojibake(match.translation))
+        normalizeFetchedText(payload?.responseData?.translatedText),
+        ...(payload?.matches || []).map((match) => normalizeFetchedText(match.translation))
     ]);
 
     if (sourceLanguage !== targetLanguage) {
@@ -149,6 +174,7 @@ const getGermanLookupCandidates = (normalizedWord) => {
 
 const getFirstGloss = (entry) => entry?.senses
     ?.flatMap((sense) => sense.glosses || [])
+    ?.map((gloss) => normalizeFetchedText(gloss))
     ?.find(Boolean);
 
 const getGermanBaseWord = (entry) => entry?.senses
@@ -377,7 +403,7 @@ const fetchTranslationTextWithDeepL = async (text, sourceLanguage, targetLanguag
         }
     );
 
-    const translatedText = maybeRepairMojibake(payload?.translations?.[0]?.text);
+    const translatedText = normalizeFetchedText(payload?.translations?.[0]?.text);
     return translatedText && !isEffectivelySameText(text, translatedText) ? translatedText : null;
 };
 
@@ -406,8 +432,8 @@ const fetchTranslationVariants = async (word, sourceLanguage, targetLanguage) =>
     try {
         const payload = await fetchJson(url.toString());
         return uniqueValues([
-            maybeRepairMojibake(payload?.responseData?.translatedText),
-            ...(payload?.matches || []).map((match) => maybeRepairMojibake(match.translation))
+            normalizeFetchedText(payload?.responseData?.translatedText),
+            ...(payload?.matches || []).map((match) => normalizeFetchedText(match.translation))
         ]).slice(0, 5);
     } catch (error) {
         return [];
@@ -552,7 +578,7 @@ const fetchGermanWordEntry = async (word, targetLanguage, phrase) => {
     const glossaryTranslations = uniqueValues(
         (entry.translations || [])
             .filter((translation) => translation.lang_code === targetLanguage)
-            .map((translation) => maybeRepairMojibake(translation.word))
+            .map((translation) => normalizeFetchedText(translation.word))
     );
 
     return {

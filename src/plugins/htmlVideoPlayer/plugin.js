@@ -162,6 +162,107 @@ function normalizeTrackEventText(text, useHtml) {
     return useHtml ? result.replace(/\n/gi, '<br>') : result;
 }
 
+function getActiveTrackEventsText(trackEvents, timeMs) {
+    if (!trackEvents?.length) {
+        return '';
+    }
+
+    const ticks = timeMs * 10000;
+    return trackEvents
+        .filter((trackEvent) => trackEvent.StartPositionTicks <= ticks && trackEvent.EndPositionTicks >= ticks)
+        .map((trackEvent) => normalizeTrackEventText(trackEvent.Text, false).trim())
+        .filter(Boolean)
+        .join('\n');
+}
+
+function parseAssTimestampToTicks(value) {
+    const match = /^(\d+):(\d{2}):(\d{2})[.:](\d{1,2})$/.exec((value || '').trim());
+    if (!match) {
+        return null;
+    }
+
+    const [, hours, minutes, seconds, centiseconds] = match;
+    const totalCentiseconds = (
+        (parseInt(hours, 10) * 60 * 60 * 100)
+        + (parseInt(minutes, 10) * 60 * 100)
+        + (parseInt(seconds, 10) * 100)
+        + parseInt(centiseconds.padEnd(2, '0'), 10)
+    );
+
+    return totalCentiseconds * 100000;
+}
+
+function splitAssEventFields(value, fieldCount) {
+    const fields = [];
+    let remaining = value;
+
+    for (let i = 0; i < fieldCount - 1; i++) {
+        const delimiterIndex = remaining.indexOf(',');
+        if (delimiterIndex === -1) {
+            return null;
+        }
+
+        fields.push(remaining.slice(0, delimiterIndex));
+        remaining = remaining.slice(delimiterIndex + 1);
+    }
+
+    fields.push(remaining);
+    return fields;
+}
+
+function parseAssTrackEvents(text) {
+    const lines = (text || '').replace(/\r/g, '').split('\n');
+    let inEventsSection = false;
+    let formatFields = null;
+    const trackEvents = [];
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            continue;
+        }
+
+        if (trimmed.startsWith('[')) {
+            inEventsSection = trimmed.toLowerCase() === '[events]';
+            continue;
+        }
+
+        if (!inEventsSection) {
+            continue;
+        }
+
+        if (trimmed.startsWith('Format:')) {
+            formatFields = trimmed.slice('Format:'.length).split(',').map((field) => field.trim().toLowerCase());
+            continue;
+        }
+
+        if (!trimmed.startsWith('Dialogue:') || !formatFields?.length) {
+            continue;
+        }
+
+        const rawValues = splitAssEventFields(trimmed.slice('Dialogue:'.length).trim(), formatFields.length);
+        if (!rawValues) {
+            continue;
+        }
+
+        const valuesByField = Object.fromEntries(formatFields.map((field, index) => [field, rawValues[index]?.trim()]));
+        const startTicks = parseAssTimestampToTicks(valuesByField.start);
+        const endTicks = parseAssTimestampToTicks(valuesByField.end);
+        const subtitleText = valuesByField.text;
+        if (startTicks == null || endTicks == null || !subtitleText) {
+            continue;
+        }
+
+        trackEvents.push({
+            StartPositionTicks: startTicks,
+            EndPositionTicks: endTicks,
+            Text: subtitleText
+        });
+    }
+
+    return { TrackEvents: trackEvents };
+}
+
 function getTextTrackUrl(track, item, format) {
     if (itemHelper.isLocalItem(item) && track.Path) {
         return track.Path;
@@ -1234,6 +1335,25 @@ export class HtmlVideoPlayer {
     /**
      * @private
      */
+    async fetchAssSubtitles(track, item) {
+        this.incrementFetchQueue();
+        try {
+            const response = await fetch(getTextTrackUrl(track, item));
+
+            if (!response.ok) {
+                throw new Error(response);
+            }
+
+            const subtitleText = await response.text();
+            return parseAssTrackEvents(subtitleText);
+        } finally {
+            this.decrementFetchQueue();
+        }
+    }
+
+    /**
+     * @private
+     */
     setTrackForDisplay(videoElement, track, targetTextTrackIndex = PRIMARY_TEXT_TRACK_INDEX) {
         if (!track) {
             // Destroy all tracks by passing undefined if there is no valid primary track
@@ -1267,7 +1387,21 @@ export class HtmlVideoPlayer {
     /**
      * @private
      */
-    renderSsaAss(videoElement, track, item) {
+    renderSsaAss(videoElement, track, item, targetTextTrackIndex = PRIMARY_TEXT_TRACK_INDEX) {
+        this.fetchAssSubtitles(track, item).then((subtitleData) => {
+            if (!this.#mediaElement) {
+                return;
+            }
+
+            if (this.isSecondaryTrack(targetTextTrackIndex)) {
+                this.#currentSecondaryTrackEvents = subtitleData.TrackEvents;
+            } else {
+                this.#currentTrackEvents = subtitleData.TrackEvents;
+            }
+        }).catch((error) => {
+            console.error('error fetching ass subtitle events', error);
+        });
+
         const supportedFonts = ['application/vnd.ms-opentype', 'application/x-truetype-font', 'font/otf', 'font/ttf', 'font/woff', 'font/woff2'];
         const availableFonts = [];
         const attachments = this._currentPlayOptions.mediaSource.MediaAttachments || [];
@@ -1444,7 +1578,7 @@ export class HtmlVideoPlayer {
         if (!itemHelper.isLocalItem(item) || track.IsExternal) {
             const format = (track.Codec || '').toLowerCase();
             if (format === 'ssa' || format === 'ass') {
-                this.renderSsaAss(videoElement, track, item);
+                this.renderSsaAss(videoElement, track, item, targetTextTrackIndex);
                 return;
             }
             if (format === 'pgssub') {
@@ -1837,7 +1971,17 @@ export class HtmlVideoPlayer {
             .filter(Boolean)
             .join('\n');
 
-        return nativeCueText || '';
+        if (nativeCueText) {
+            return nativeCueText;
+        }
+
+        const timeMs = (mediaElement.currentTime || 0) * 1000;
+        const renderedTrackText = [
+            getActiveTrackEventsText(this.#currentTrackEvents, timeMs),
+            getActiveTrackEventsText(this.#currentSecondaryTrackEvents, timeMs)
+        ].filter(Boolean).join('\n');
+
+        return renderedTrackText || '';
     }
 
     duration() {

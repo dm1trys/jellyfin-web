@@ -1,6 +1,7 @@
 export const normalizeSubtitleText = (text: string) => text
     .replace(/<[^>]+>/g, ' ')
     .replace(/\r/g, '')
+    .replace(/[\u200E\u200F\u202A-\u202E]/g, '')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
@@ -9,7 +10,7 @@ export const normalizeSubtitleText = (text: string) => text
     .trim();
 
 export const tokenizeWords = (text: string) => (
-    text.match(/[A-Za-zÀ-ÖØ-öø-ÿĀ-žẞЀ-ӿ'-]+/g) || []
+    text.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) || []
 );
 
 export const titleCase = (value: string) => (
