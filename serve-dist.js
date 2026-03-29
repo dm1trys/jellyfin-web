@@ -29,7 +29,14 @@ const contentTypes = {
 
 const safeResolve = (requestPath) => {
     const pathname = decodeURIComponent(requestPath.split('?')[0]);
-    const normalized = pathname === '/' ? '/index.html' : pathname;
+    let normalized = pathname;
+
+    if (normalized === '/' || normalized === '/web' || normalized === '/web/') {
+        normalized = '/index.html';
+    } else if (normalized.startsWith('/web/')) {
+        normalized = normalized.slice('/web'.length);
+    }
+
     const resolved = path.resolve(path.join(distDir, `.${normalized}`));
     if (!resolved.startsWith(distDir)) {
         return null;
