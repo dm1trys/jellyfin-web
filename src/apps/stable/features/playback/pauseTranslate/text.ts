@@ -1,4 +1,5 @@
 export const normalizeSubtitleText = (text: string) => text
+    .replace(/\{\\[^}]+\}/g, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\r/g, '')
     .replace(/[\u200E\u200F\u202A-\u202E]/g, '')

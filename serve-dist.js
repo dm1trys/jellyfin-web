@@ -39,6 +39,7 @@ const safeResolve = (requestPath) => {
 };
 
 const normalizeSubtitleText = (text) => text
+    .replace(/\{\\[^}]+\}/g, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\r/g, '')
     .replace(/[\u200E\u200F\u202A-\u202E]/g, '')
@@ -100,6 +101,27 @@ const uniqueValues = (values) => values
     .map((value) => value.trim())
     .filter((value, index, list) => list.indexOf(value) === index);
 
+const isLowerCaseToken = (value) => typeof value === 'string' && value === value.toLocaleLowerCase('de-DE');
+
+const GERMAN_FUNCTION_WORDS = new Set([
+    'aber', 'als', 'am', 'an', 'auch', 'auf', 'aus', 'bei', 'bis', 'da', 'das', 'dem',
+    'den', 'der', 'des', 'die', 'du', 'durch', 'ein', 'eine', 'einem', 'einen', 'einer',
+    'er', 'es', 'euch', 'euer', 'für', 'gegen', 'habts', 'heute', 'hinter', 'ihr', 'ich',
+    'ihm', 'im', 'in', 'ins', 'ist', 'ja', 'kein', 'keine', 'mein', 'mir', 'mit', 'nach',
+    'nein', 'nicht', 'nur', 'ohne', 'sein', 'sie', 'so', 'über', 'um', 'und', 'uns', 'unter',
+    'vom', 'von', 'vor', 'war', 'wegen', 'wir', 'zu', 'zum', 'zur'
+]);
+
+const GERMAN_PART_OF_SPEECH_HINTS = [
+    { test: /\bgeschlechtswort\b|\bartikel\b/i, value: 'article' },
+    { test: /\bpronomen\b/i, value: 'pronoun' },
+    { test: /\bpräposition\b/i, value: 'preposition' },
+    { test: /\bkonjunktion\b/i, value: 'conjunction' },
+    { test: /\badverb/i, value: 'adverb' },
+    { test: /\badjektiv/i, value: 'adjective' },
+    { test: /\bverb/i, value: 'verb' }
+];
+
 const inferPartOfSpeech = (word) => {
     const lower = word.toLowerCase();
 
@@ -156,8 +178,14 @@ const getPreferredTranslation = (sourceText, sourceLanguage, targetLanguage, pay
     return candidates[0] || sourceText;
 };
 
-const getGermanLookupCandidates = (normalizedWord) => {
-    const candidates = [normalizedWord];
+const getGermanLookupCandidates = (normalizedWord, originalToken = normalizedWord) => {
+    const candidates = [];
+
+    if (typeof originalToken === 'string' && originalToken.trim()) {
+        candidates.push(originalToken.trim().normalize('NFC'));
+    }
+
+    candidates.push(normalizedWord);
 
     // Subtitles often omit apostrophes in colloquial contractions, e.g. "habts" for "habt's".
     if (normalizedWord.endsWith('s') && normalizedWord.length > 3) {
@@ -171,6 +199,170 @@ const getGermanLookupCandidates = (normalizedWord) => {
 
     return uniqueValues(candidates);
 };
+
+const inferGermanEntryPartOfSpeech = (entry, normalizedWord) => {
+    const gloss = getFirstGloss(entry) || '';
+
+    if (/ein hohes Gewicht habend|zu euch gehörig|euch gehörend|ähnlich sein|ähnlich werden|redensartlich für sehr/i.test(gloss)) {
+        return 'adjective';
+    }
+
+    if (/ursprung räumlicher oder zeitlicher veränderung|herkunft|gegenstand der betrachtung|mit um, ohne, anstatt/i.test(gloss)) {
+        return 'preposition';
+    }
+
+    if (/hilfsverb/i.test(gloss)) {
+        return 'verb';
+    }
+
+    for (const hint of GERMAN_PART_OF_SPEECH_HINTS) {
+        if (hint.test.test(gloss)) {
+            return hint.value;
+        }
+    }
+
+    if (entry?.pos) {
+        return entry.pos;
+    }
+
+    if (GERMAN_FUNCTION_WORDS.has(normalizedWord)) {
+        if (['der', 'die', 'das', 'dem', 'den', 'des', 'ein', 'eine', 'einem', 'einen', 'einer'].includes(normalizedWord)) {
+            return 'article';
+        }
+        if (['ich', 'du', 'er', 'sie', 'es', 'wir', 'ihr', 'euch', 'mir', 'ihm', 'uns', 'dich', 'mein', 'euer'].includes(normalizedWord)) {
+            return 'pronoun';
+        }
+        if (['in', 'an', 'auf', 'aus', 'bei', 'für', 'gegen', 'mit', 'nach', 'ohne', 'über', 'um', 'unter', 'von', 'vor', 'zu', 'wegen'].includes(normalizedWord)) {
+            return 'preposition';
+        }
+        if (['aber', 'als', 'auch', 'da', 'ja', 'nein', 'nur', 'so', 'und'].includes(normalizedWord)) {
+            return 'conjunction';
+        }
+    }
+
+    if (isLikelyGermanVerbForm(entry)) {
+        return 'verb';
+    }
+
+    if (isLowerCaseToken(normalizedWord) && /(ig|lich|isch|sam|bar|los|haft|end|ern?|en)$/.test(normalizedWord)) {
+        return 'adjective';
+    }
+
+    return inferPartOfSpeech(normalizedWord);
+};
+
+const scoreGermanEntry = (entry, normalizedWord, originalToken) => {
+    if (!entry?.senses?.length) {
+        return Number.NEGATIVE_INFINITY;
+    }
+
+    const gloss = getFirstGloss(entry) || '';
+    const firstSenseTags = entry.senses?.[0]?.tags || [];
+    const lowerCaseOriginal = isLowerCaseToken(originalToken || normalizedWord);
+    let score = 100;
+
+    if (entry.pos) {
+        score += 10;
+    }
+
+    if (gloss) {
+        score += 10;
+    }
+
+    if (firstSenseTags.includes('colloquial')) {
+        score -= 25;
+    }
+
+    if (entry.pos === 'noun' && lowerCaseOriginal) {
+        score -= 45;
+    }
+
+    if (entry.forms?.some((form) => form.article) && lowerCaseOriginal) {
+        score -= 30;
+    }
+
+    if (GERMAN_FUNCTION_WORDS.has(normalizedWord) && entry.pos === 'noun') {
+        score -= 35;
+    }
+
+    if (/\bgeschlechtswort\b|\bartikel\b|\bpronomen\b|\bpräposition\b|\bkonjunktion\b/i.test(gloss)) {
+        score += 40;
+    }
+
+    if (/abermals, noch einmal|geschlossen|ein hohes Gewicht habend/i.test(gloss) && GERMAN_FUNCTION_WORDS.has(normalizedWord)) {
+        score -= 40;
+    }
+
+    if (normalizedWord === 'zu' && /^geschlossen$/i.test(gloss)) {
+        score -= 60;
+    }
+
+    if (normalizedWord === 'schwer' && /ein hohes Gewicht habend/i.test(gloss)) {
+        score += 15;
+    }
+
+    if (normalizedWord === 'über' && /\bpräposition\b/i.test(gloss)) {
+        score += 40;
+    }
+
+    if (entry.word && entry.word.toLocaleLowerCase('de-DE') === normalizedWord) {
+        score += 10;
+    }
+
+    return score;
+};
+
+const selectGermanEntry = (entries, normalizedWord, originalToken) => (
+    (entries || [])
+        .filter((candidate) => candidate?.senses?.length)
+        .sort((left, right) => scoreGermanEntry(right, normalizedWord, originalToken) - scoreGermanEntry(left, normalizedWord, originalToken))[0]
+);
+
+const isProbablyTargetLanguageText = (value, sourceWord, targetLanguage) => {
+    if (typeof value !== 'string') {
+        return false;
+    }
+
+    const normalized = normalizeFetchedText(value);
+    if (!normalized) {
+        return false;
+    }
+
+    if (/<[^>]+>/.test(normalized)) {
+        return false;
+    }
+
+    if (isEffectivelySameText(sourceWord, normalized)) {
+        return false;
+    }
+
+    if (/[\"“”„<>]/.test(normalized)) {
+        return false;
+    }
+
+    if (targetLanguage === 'uk') {
+        if (!/[А-Яа-яІіЇїЄєҐґ]/.test(normalized)) {
+            return false;
+        }
+
+        if (/[A-Za-z]{4,}/.test(normalized)) {
+            return false;
+        }
+    }
+
+    if (normalized.length > 48) {
+        return false;
+    }
+
+    if ((normalized.match(/[.!?]/g) || []).length > 1) {
+        return false;
+    }
+
+    return true;
+};
+
+const filterTranslationCandidates = (values, sourceWord, targetLanguage) => uniqueValues(values)
+    .filter((value) => isProbablyTargetLanguageText(value, sourceWord, targetLanguage));
 
 const getFirstGloss = (entry) => entry?.senses
     ?.flatMap((sense) => sense.glosses || [])
@@ -272,18 +464,38 @@ const resolveGermanSeparableVerb = (normalizedWord, phrase, sourceEntry, baseWor
     return null;
 };
 
-const buildFallbackWordEntry = (word) => {
+const buildFallbackWordEntry = (word, options = {}) => {
     const normalized = word.toLowerCase();
+    const normalizedPartOfSpeech = {
+        adj: 'adjective',
+        adjective: 'adjective',
+        adverb: 'adverb',
+        name: 'proper noun',
+        noun: 'noun',
+        phrase: 'phrase',
+        prep: 'preposition',
+        preposition: 'preposition',
+        pron: 'pronoun',
+        pronoun: 'pronoun',
+        propernoun: 'proper noun',
+        proper_noun: 'proper noun',
+        verb: 'verb'
+    };
+    const fallbackPartOfSpeech = normalizedPartOfSpeech[String(options.partOfSpeechHint || '').toLowerCase()]
+        || (options.isProperName ? 'proper noun' : null)
+        || (GERMAN_FUNCTION_WORDS.has(normalized)
+            ? inferGermanEntryPartOfSpeech(undefined, normalized)
+            : inferPartOfSpeech(normalized));
+    const contextualMeaning = options.contextualMeaning
+        || (options.isProperName
+            ? 'Eigenname'
+            : `Context meaning: ${titleCase(normalized)}`);
 
     return {
-        lemma: normalized,
-        partOfSpeech: inferPartOfSpeech(normalized),
-        contextualMeaning: `Context meaning: ${titleCase(normalized)}`,
-        translations: [
-            `${normalized} (main)`,
-            `${normalized} (context)`,
-            `${normalized} (literal)`
-        ]
+        lemma: options.lemma || normalized,
+        partOfSpeech: fallbackPartOfSpeech,
+        contextualMeaning,
+        translations: []
     };
 };
 
@@ -440,21 +652,29 @@ const fetchTranslationVariants = async (word, sourceLanguage, targetLanguage) =>
     }
 };
 
-const fetchGermanExactEntry = async (word) => {
+const fetchGermanExactEntry = async (word, originalToken = word) => {
     const payload = await fetchJson(`https://api.wiktapi.dev/v1/de/word/${encodeURIComponent(word)}?lang=de`);
-    const entry = (payload?.entries || []).find((candidate) => candidate?.senses?.length);
+    const entry = selectGermanEntry(payload?.entries || [], word.toLocaleLowerCase('de-DE'), originalToken);
     return entry ? { payload, entry, resolvedWord: word } : null;
 };
 
-const fetchGermanSearchEntry = async (word) => {
+const fetchGermanSearchEntry = async (word, originalToken = word) => {
     const payload = await fetchJson(`https://api.wiktapi.dev/v1/de/search?q=${encodeURIComponent(word)}&lang=de`);
     const results = Array.isArray(payload) ? payload : payload?.results || payload?.entries || [];
-    const bestMatch = results.find((result) => typeof result?.word === 'string');
+    const normalizedQuery = word.toLocaleLowerCase('de-DE');
+    const bestMatch = results.find((result) => typeof result?.word === 'string' && result.word.toLocaleLowerCase('de-DE') === normalizedQuery)
+        || results.find((result) => typeof result?.word === 'string' && result?.pos !== 'phrase')
+        || results.find((result) => typeof result?.word === 'string');
     if (!bestMatch?.word) {
         return null;
     }
 
-    return fetchGermanExactEntry(bestMatch.word);
+    try {
+        const exactMatch = await fetchGermanExactEntry(bestMatch.word, originalToken);
+        return exactMatch ? { ...exactMatch, bestMatch } : { payload, entry: null, resolvedWord: bestMatch.word, bestMatch };
+    } catch (error) {
+        return { payload, entry: null, resolvedWord: bestMatch.word, bestMatch };
+    }
 };
 
 const getGermanSeparablePrefixParts = (word) => {
@@ -471,7 +691,7 @@ const getGermanSeparablePrefixParts = (word) => {
 const fetchGermanSeparableStemEntry = async (word) => {
     for (const { prefix, stem } of getGermanSeparablePrefixParts(word)) {
         try {
-            const stemMatch = await fetchGermanExactEntry(stem);
+            const stemMatch = await fetchGermanExactEntry(stem, word);
             if (!stemMatch) {
                 continue;
             }
@@ -497,17 +717,19 @@ const fetchGermanSeparableStemEntry = async (word) => {
     return null;
 };
 
-const fetchGermanWordEntry = async (word, targetLanguage, phrase) => {
+const fetchGermanWordEntry = async (word, targetLanguage, phrase, originalToken = word) => {
     const normalizedWord = word.toLowerCase();
-    const lookupCandidates = getGermanLookupCandidates(normalizedWord);
+    const lookupCandidates = getGermanLookupCandidates(normalizedWord, originalToken);
+    const mayBeProperName = originalToken !== normalizedWord && /^[A-ZÄÖÜ]/.test(originalToken);
 
     let resolvedLookupWord = normalizedWord;
     let sourcePayload = { entries: [] };
     let sourceEntry;
     let separableVerbOverride = null;
+    let searchHint = null;
     for (const candidate of lookupCandidates) {
         try {
-            const exactMatch = await fetchGermanExactEntry(candidate);
+            const exactMatch = await fetchGermanExactEntry(candidate, originalToken);
             if (exactMatch) {
                 resolvedLookupWord = exactMatch.resolvedWord;
                 sourcePayload = exactMatch.payload;
@@ -535,11 +757,12 @@ const fetchGermanWordEntry = async (word, targetLanguage, phrase) => {
     if (!sourceEntry) {
         for (const candidate of lookupCandidates) {
             try {
-                const searchMatch = await fetchGermanSearchEntry(candidate);
+                const searchMatch = await fetchGermanSearchEntry(candidate, originalToken);
                 if (searchMatch) {
                     resolvedLookupWord = searchMatch.resolvedWord;
                     sourcePayload = searchMatch.payload;
                     sourceEntry = searchMatch.entry;
+                    searchHint = searchMatch.bestMatch || null;
                     break;
                 }
             } catch (error) {
@@ -555,16 +778,26 @@ const fetchGermanWordEntry = async (word, targetLanguage, phrase) => {
     let entry = (sourcePayload?.entries || []).find((candidate) => candidate?.senses?.length);
     if (preferredLookupWord.toLowerCase() !== resolvedLookupWord) {
         try {
-            const baseMatch = await fetchGermanExactEntry(preferredLookupWord);
+            const baseMatch = await fetchGermanExactEntry(preferredLookupWord, originalToken);
             entry = baseMatch?.entry || entry;
         } catch (error) {
             // Keep the source entry as fallback when combined lemma lookup fails.
         }
     }
 
-    const translationVariants = await fetchTranslationVariants(preferredLookupWord, 'de', targetLanguage);
+    const translationVariants = filterTranslationCandidates(
+        await fetchTranslationVariants(preferredLookupWord, 'de', targetLanguage),
+        preferredLookupWord,
+        targetLanguage
+    );
     if (!entry) {
-        const fallbackEntry = buildFallbackWordEntry(normalizedWord);
+        const isProperName = mayBeProperName && !searchHint?.pos;
+        const fallbackEntry = buildFallbackWordEntry(normalizedWord, {
+            isProperName,
+            lemma: isProperName ? originalToken : normalizedWord,
+            partOfSpeechHint: searchHint?.pos,
+            contextualMeaning: isProperName ? 'Eigenname' : undefined
+        });
         fallbackEntry.translations = translationVariants.length ? translationVariants : fallbackEntry.translations;
         if (separableVerb) {
             fallbackEntry.lemma = separableVerb.combinedLemma;
@@ -575,15 +808,20 @@ const fetchGermanWordEntry = async (word, targetLanguage, phrase) => {
         return fallbackEntry;
     }
 
-    const glossaryTranslations = uniqueValues(
+    const glossaryTranslations = filterTranslationCandidates(
         (entry.translations || [])
             .filter((translation) => translation.lang_code === targetLanguage)
             .map((translation) => normalizeFetchedText(translation.word))
-    );
+    , preferredLookupWord, targetLanguage);
+
+    const partOfSpeech = inferGermanEntryPartOfSpeech(entry, normalizedWord);
+    const lemma = partOfSpeech === 'noun'
+        ? getGermanLemma(entry, preferredLookupWord)
+        : (entry?.word || preferredLookupWord);
 
     return {
-        lemma: getGermanLemma(entry, preferredLookupWord),
-        partOfSpeech: entry.pos || (isLikelyGermanVerbForm(entry) ? 'verb' : inferPartOfSpeech(preferredLookupWord)),
+        lemma,
+        partOfSpeech,
         contextualMeaning: getFirstGloss(entry) || `Kontextbedeutung: ${titleCase(preferredLookupWord)}`,
         translations: uniqueValues([
             ...glossaryTranslations,
@@ -599,11 +837,15 @@ const fetchGermanWordEntry = async (word, targetLanguage, phrase) => {
 const buildInspectorByWord = async (tokens, phrase, sourceLanguage, targetLanguage) => {
     const inspectorByWord = {};
     const uniqueKeys = [];
+    const originalTokensByKey = {};
 
     for (const token of tokens) {
         const key = token.toLowerCase();
         if (!uniqueKeys.includes(key)) {
             uniqueKeys.push(key);
+        }
+        if (!originalTokensByKey[key]) {
+            originalTokensByKey[key] = token;
         }
     }
 
@@ -616,10 +858,14 @@ const buildInspectorByWord = async (tokens, phrase, sourceLanguage, targetLangua
 
             try {
                 if (sourceLanguage === 'de') {
-                    inspectorByWord[key] = await fetchGermanWordEntry(key, targetLanguage, phrase);
+                    inspectorByWord[key] = await fetchGermanWordEntry(key, targetLanguage, phrase, originalTokensByKey[key]);
                 } else {
                     const fallbackEntry = buildFallbackWordEntry(key);
-                    const translations = await fetchTranslationVariants(key, sourceLanguage, targetLanguage);
+                    const translations = filterTranslationCandidates(
+                        await fetchTranslationVariants(key, sourceLanguage, targetLanguage),
+                        key,
+                        targetLanguage
+                    );
                     fallbackEntry.translations = translations.length ? translations : fallbackEntry.translations;
                     inspectorByWord[key] = fallbackEntry;
                 }
@@ -676,7 +922,7 @@ const sendFile = (response, filePath) => {
 };
 
 const getPauseTranslateRequestParams = (body) => {
-    const phrase = normalizeSubtitleText(toTrimmedString(body.phrase));
+    const phrase = normalizeSubtitleText(toTrimmedString(body.phrase || body.text));
     const sourceLanguage = toTrimmedString(body.sourceLanguage) || 'en';
     const targetLanguage = toTrimmedString(body.targetLanguage) || 'uk';
 
