@@ -4,8 +4,8 @@ const http = require('node:http');
 const https = require('node:https');
 
 const distDir = path.join(__dirname, 'dist');
-const port = 8097;
-const serverHost = '192.168.1.41';
+const port = Number(process.env.WEB_CLIENT_PORT || 8097);
+const bindHost = process.env.BIND_HOST || '0.0.0.0';
 const lookupTimeoutMs = 8000;
 
 const contentTypes = {
@@ -45,11 +45,30 @@ const normalizeSubtitleText = (text) => text
     .map((line) => line.trim())
     .filter(Boolean)
     .join('\n')
+    .normalize('NFC')
     .trim();
 
 const tokenizeWords = (text) => (
-    text.match(/[A-Za-zÀ-ÿ'-]+/g) || []
+    text.match(/[A-Za-zÀ-ÖØ-öø-ÿĀ-žẞЀ-ӿ'-]+/g) || []
 );
+
+const maybeRepairMojibake = (value) => {
+    if (typeof value !== 'string') {
+        return value;
+    }
+
+    // Heuristic for UTF-8 text that arrived decoded as latin1/win1252, e.g. "Ð¡Ñ..." or "Ã¶".
+    if (!/[ÃÐÑ]/.test(value)) {
+        return value;
+    }
+
+    try {
+        const repaired = Buffer.from(value, 'latin1').toString('utf8');
+        return repaired.includes('\uFFFD') ? value : repaired;
+    } catch (error) {
+        return value;
+    }
+};
 
 const uniqueValues = (values) => values
     .filter((value) => typeof value === 'string' && value.trim())
@@ -72,15 +91,58 @@ const titleCase = (value) => (
 
 const SEPARABLE_PREFIXES = new Set([
     'ab', 'an', 'auf', 'aus', 'bei', 'da', 'dabei', 'daran', 'darauf', 'durch',
-    'ein', 'empor', 'entgegen', 'entlang', 'fehl', 'fern', 'fest', 'fort', 'frei',
-    'gegenüber', 'gleich', 'heim', 'her', 'hin', 'hoch', 'los', 'mit', 'nach',
-    'nieder', 'statt', 'teil', 'tot', 'um', 'unter', 'vor', 'weg', 'weiter',
-    'wieder', 'zu', 'zurück', 'zusammen'
+    'drauf', 'dran', 'drin', 'drüber', 'drum', 'drunter', 'ein', 'empor', 'entgegen',
+    'entlang', 'fehl', 'fern', 'fest', 'fort', 'frei', 'gegenüber', 'gleich', 'heim',
+    'her', 'hin', 'hoch', 'los', 'mit', 'nach', 'nieder', 'rauf', 'raus', 'rein',
+    'rum', 'runter', 'rüber', 'statt', 'teil', 'tot', 'um', 'unter', 'vor', 'weg',
+    'weiter', 'wieder', 'zu', 'zurück', 'zusammen'
 ]);
 
 const toTrimmedString = (value) => (
     typeof value === 'string' ? value.trim() : ''
 );
+
+const normalizeComparableText = (value) => toTrimmedString(value)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const isEffectivelySameText = (left, right) => (
+    normalizeComparableText(left) === normalizeComparableText(right)
+);
+
+const getPreferredTranslation = (sourceText, sourceLanguage, targetLanguage, payload) => {
+    const candidates = uniqueValues([
+        maybeRepairMojibake(payload?.responseData?.translatedText),
+        ...(payload?.matches || []).map((match) => maybeRepairMojibake(match.translation))
+    ]);
+
+    if (sourceLanguage !== targetLanguage) {
+        const distinctCandidate = candidates.find((candidate) => !isEffectivelySameText(sourceText, candidate));
+        if (distinctCandidate) {
+            return distinctCandidate;
+        }
+    }
+
+    return candidates[0] || sourceText;
+};
+
+const getGermanLookupCandidates = (normalizedWord) => {
+    const candidates = [normalizedWord];
+
+    // Subtitles often omit apostrophes in colloquial contractions, e.g. "habts" for "habt's".
+    if (normalizedWord.endsWith('s') && normalizedWord.length > 3) {
+        candidates.push(normalizedWord.slice(0, -1));
+    }
+
+    const capitalized = titleCase(normalizedWord);
+    if (capitalized !== normalizedWord) {
+        candidates.push(capitalized);
+    }
+
+    return uniqueValues(candidates);
+};
 
 const getFirstGloss = (entry) => entry?.senses
     ?.flatMap((sense) => sense.glosses || [])
@@ -231,9 +293,7 @@ const fetchTranslationText = async (text, sourceLanguage, targetLanguage) => {
     url.searchParams.set('langpair', `${sourceLanguage}|${targetLanguage}`);
 
     const payload = await fetchJson(url.toString());
-    return payload?.responseData?.translatedText
-        || payload?.matches?.find((match) => match.translation)?.translation
-        || text;
+    return getPreferredTranslation(text, sourceLanguage, targetLanguage, payload);
 };
 
 const fetchTranslationVariants = async (word, sourceLanguage, targetLanguage) => {
@@ -244,27 +304,131 @@ const fetchTranslationVariants = async (word, sourceLanguage, targetLanguage) =>
     try {
         const payload = await fetchJson(url.toString());
         return uniqueValues([
-            payload?.responseData?.translatedText,
-            ...(payload?.matches || []).map((match) => match.translation)
+            maybeRepairMojibake(payload?.responseData?.translatedText),
+            ...(payload?.matches || []).map((match) => maybeRepairMojibake(match.translation))
         ]).slice(0, 5);
     } catch (error) {
         return [];
     }
 };
 
+const fetchGermanExactEntry = async (word) => {
+    const payload = await fetchJson(`https://api.wiktapi.dev/v1/de/word/${encodeURIComponent(word)}?lang=de`);
+    const entry = (payload?.entries || []).find((candidate) => candidate?.senses?.length);
+    return entry ? { payload, entry, resolvedWord: word } : null;
+};
+
+const fetchGermanSearchEntry = async (word) => {
+    const payload = await fetchJson(`https://api.wiktapi.dev/v1/de/search?q=${encodeURIComponent(word)}&lang=de`);
+    const results = Array.isArray(payload) ? payload : payload?.results || payload?.entries || [];
+    const bestMatch = results.find((result) => typeof result?.word === 'string');
+    if (!bestMatch?.word) {
+        return null;
+    }
+
+    return fetchGermanExactEntry(bestMatch.word);
+};
+
+const getGermanSeparablePrefixParts = (word) => {
+    const prefixes = Array.from(SEPARABLE_PREFIXES)
+        .filter((prefix) => word.startsWith(prefix) && word.length > prefix.length)
+        .sort((left, right) => right.length - left.length);
+
+    return prefixes.map((prefix) => ({
+        prefix,
+        stem: word.slice(prefix.length)
+    }));
+};
+
+const fetchGermanSeparableStemEntry = async (word) => {
+    for (const { prefix, stem } of getGermanSeparablePrefixParts(word)) {
+        try {
+            const stemMatch = await fetchGermanExactEntry(stem);
+            if (!stemMatch) {
+                continue;
+            }
+
+            const baseWord = getGermanBaseWord(stemMatch.entry);
+            if (!baseWord) {
+                continue;
+            }
+
+            return {
+                prefix,
+                stem,
+                entry: stemMatch.entry,
+                payload: stemMatch.payload,
+                resolvedWord: stemMatch.resolvedWord,
+                combinedLemma: `${prefix}${baseWord}`
+            };
+        } catch (error) {
+            // Keep searching through possible stems.
+        }
+    }
+
+    return null;
+};
+
 const fetchGermanWordEntry = async (word, targetLanguage, phrase) => {
     const normalizedWord = word.toLowerCase();
-    const sourcePayload = await fetchJson(`https://api.wiktapi.dev/v1/de/word/${encodeURIComponent(normalizedWord)}?lang=de`);
-    const sourceEntry = (sourcePayload?.entries || []).find((candidate) => candidate?.senses?.length);
-    const baseWord = getGermanBaseWord(sourceEntry);
-    const separableVerb = resolveGermanSeparableVerb(normalizedWord, phrase, sourceEntry, baseWord);
-    const preferredLookupWord = separableVerb?.combinedLemma || baseWord || normalizedWord;
+    const lookupCandidates = getGermanLookupCandidates(normalizedWord);
 
-    let entry = (sourcePayload?.entries || []).find((candidate) => candidate?.pos && candidate?.senses?.length);
-    if (preferredLookupWord.toLowerCase() !== normalizedWord) {
+    let resolvedLookupWord = normalizedWord;
+    let sourcePayload = { entries: [] };
+    let sourceEntry;
+    let separableVerbOverride = null;
+    for (const candidate of lookupCandidates) {
         try {
-            const basePayload = await fetchJson(`https://api.wiktapi.dev/v1/de/word/${encodeURIComponent(preferredLookupWord)}?lang=de`);
-            entry = (basePayload?.entries || []).find((candidate) => candidate?.pos && candidate?.senses?.length) || entry;
+            const exactMatch = await fetchGermanExactEntry(candidate);
+            if (exactMatch) {
+                resolvedLookupWord = exactMatch.resolvedWord;
+                sourcePayload = exactMatch.payload;
+                sourceEntry = exactMatch.entry;
+                break;
+            }
+        } catch (error) {
+            // Continue trying normalized lookup candidates when a colloquial form is missing.
+        }
+    }
+
+    if (!sourceEntry) {
+        const separableStemMatch = await fetchGermanSeparableStemEntry(normalizedWord);
+        if (separableStemMatch) {
+            resolvedLookupWord = separableStemMatch.resolvedWord;
+            sourcePayload = separableStemMatch.payload;
+            sourceEntry = separableStemMatch.entry;
+            separableVerbOverride = {
+                combinedLemma: separableStemMatch.combinedLemma,
+                prefix: separableStemMatch.prefix
+            };
+        }
+    }
+
+    if (!sourceEntry) {
+        for (const candidate of lookupCandidates) {
+            try {
+                const searchMatch = await fetchGermanSearchEntry(candidate);
+                if (searchMatch) {
+                    resolvedLookupWord = searchMatch.resolvedWord;
+                    sourcePayload = searchMatch.payload;
+                    sourceEntry = searchMatch.entry;
+                    break;
+                }
+            } catch (error) {
+                // Keep falling back until candidates are exhausted.
+            }
+        }
+    }
+
+    const baseWord = getGermanBaseWord(sourceEntry);
+    const separableVerb = separableVerbOverride || resolveGermanSeparableVerb(resolvedLookupWord, phrase, sourceEntry, baseWord);
+    const preferredLookupWord = separableVerb?.combinedLemma || baseWord || resolvedLookupWord;
+
+    let entry = (sourcePayload?.entries || []).find((candidate) => candidate?.senses?.length);
+    if (preferredLookupWord.toLowerCase() !== resolvedLookupWord) {
+        try {
+            const baseMatch = await fetchGermanExactEntry(preferredLookupWord);
+            entry = baseMatch?.entry || entry;
         } catch (error) {
             // Keep the source entry as fallback when combined lemma lookup fails.
         }
@@ -277,6 +441,8 @@ const fetchGermanWordEntry = async (word, targetLanguage, phrase) => {
         if (separableVerb) {
             fallbackEntry.lemma = separableVerb.combinedLemma;
             fallbackEntry.grammarTags = [`Trennbar: ${separableVerb.prefix}-`];
+        } else if (resolvedLookupWord !== normalizedWord) {
+            fallbackEntry.lemma = resolvedLookupWord;
         }
         return fallbackEntry;
     }
@@ -284,12 +450,12 @@ const fetchGermanWordEntry = async (word, targetLanguage, phrase) => {
     const glossaryTranslations = uniqueValues(
         (entry.translations || [])
             .filter((translation) => translation.lang_code === targetLanguage)
-            .map((translation) => translation.word)
+            .map((translation) => maybeRepairMojibake(translation.word))
     );
 
     return {
         lemma: getGermanLemma(entry, preferredLookupWord),
-        partOfSpeech: entry.pos || inferPartOfSpeech(normalizedWord),
+        partOfSpeech: entry.pos || (isLikelyGermanVerbForm(entry) ? 'verb' : inferPartOfSpeech(preferredLookupWord)),
         contextualMeaning: getFirstGloss(entry) || `Kontextbedeutung: ${titleCase(preferredLookupWord)}`,
         translations: uniqueValues([
             ...glossaryTranslations,
@@ -412,6 +578,6 @@ http.createServer(async (request, response) => {
 
         sendFile(response, path.join(distDir, 'index.html'));
     });
-}).listen(port, '0.0.0.0', () => {
-    console.log(`Serving Jellyfin web client at http://${serverHost}:${port}`);
+}).listen(port, bindHost, () => {
+    console.log(`Serving Jellyfin web client at http://${bindHost}:${port}`);
 });

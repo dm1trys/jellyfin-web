@@ -5,10 +5,11 @@ export const normalizeSubtitleText = (text: string) => text
     .map((line) => line.trim())
     .filter(Boolean)
     .join('\n')
+    .normalize('NFC')
     .trim();
 
 export const tokenizeWords = (text: string) => (
-    text.match(/[A-Za-zГЂ-Гї'-]+/g) || []
+    text.match(/[A-Za-zÀ-ÖØ-öø-ÿĀ-žẞЀ-ӿ'-]+/g) || []
 );
 
 export const titleCase = (value: string) => (
