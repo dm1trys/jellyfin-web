@@ -32,6 +32,16 @@ const titleCase = (value: string) => (
     value.charAt(0).toUpperCase() + value.slice(1)
 );
 
+const getSourceLanguage = () => {
+    const language = currentSettings.pauseTranslateSourceLanguage();
+    return typeof language === 'string' && language ? language : 'en';
+};
+
+const getTargetLanguage = () => {
+    const language = currentSettings.pauseTranslateTargetLanguage();
+    return typeof language === 'string' && language ? language : 'uk';
+};
+
 const inferPartOfSpeech = (word: string) => {
     const lower = word.toLowerCase();
 
@@ -69,6 +79,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
     private inspectorContextNode?: HTMLDivElement;
     private inspectorTranslationsNode?: HTMLDivElement;
     private translationCache = new Map<string, string>();
+    private wordEntryCache = new Map<string, MockWordEntry>();
     private lastVisibleSubtitleText = '';
     private lastRenderedSubtitleText = '';
     private activeRequestId = 0;
@@ -183,9 +194,26 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
             return;
         }
 
-        const entry = buildMockWordEntry(this.selectedWord);
+        const selectedWord = this.selectedWord;
 
         this.inspectorNode.classList.remove('hide');
+        this.inspectorWordNode.textContent = selectedWord.toLowerCase();
+        this.inspectorPartOfSpeechNode.textContent = 'loading';
+        this.inspectorContextNode.textContent = 'Loading word details...';
+        this.inspectorTranslationsNode.innerHTML = '';
+        void this.loadWordInspectorEntry(selectedWord);
+    }
+
+    private renderWordInspectorEntry(entry: MockWordEntry) {
+        if (
+            !this.inspectorWordNode
+            || !this.inspectorPartOfSpeechNode
+            || !this.inspectorContextNode
+            || !this.inspectorTranslationsNode
+        ) {
+            return;
+        }
+
         this.inspectorWordNode.textContent = entry.lemma;
         this.inspectorPartOfSpeechNode.textContent = entry.partOfSpeech;
         this.inspectorContextNode.textContent = entry.contextualMeaning;
@@ -197,6 +225,89 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
             chip.textContent = translation;
             this.inspectorTranslationsNode.appendChild(chip);
         }
+    }
+
+    private async loadWordInspectorEntry(word: string) {
+        const sourceLanguage = getSourceLanguage();
+        const targetLanguage = getTargetLanguage();
+        const cacheKey = `${sourceLanguage}|${targetLanguage}|${word.toLowerCase()}`;
+
+        if (this.wordEntryCache.has(cacheKey)) {
+            this.renderWordInspectorEntry(this.wordEntryCache.get(cacheKey) as MockWordEntry);
+            return;
+        }
+
+        try {
+            const entry = await this.fetchWordInspectorEntry(word, sourceLanguage, targetLanguage);
+            this.wordEntryCache.set(cacheKey, entry);
+
+            if (this.selectedWord?.toLowerCase() === word.toLowerCase()) {
+                this.renderWordInspectorEntry(entry);
+            }
+        } catch (error) {
+            console.error('[PauseTranslateSubscriber] word inspector error', error);
+            const fallbackEntry = buildMockWordEntry(word);
+            this.wordEntryCache.set(cacheKey, fallbackEntry);
+            if (this.selectedWord?.toLowerCase() === word.toLowerCase()) {
+                this.renderWordInspectorEntry(fallbackEntry);
+            }
+        }
+    }
+
+    private async fetchWordInspectorEntry(word: string, sourceLanguage: string, targetLanguage: string) {
+        const normalizedWord = word.toLowerCase();
+        const translationVariantsPromise = this.fetchTranslationVariants(normalizedWord, sourceLanguage, targetLanguage);
+
+        if (sourceLanguage !== 'en') {
+            const fallbackEntry = buildMockWordEntry(normalizedWord);
+            const translations = await translationVariantsPromise;
+            fallbackEntry.translations = translations.length ? translations : fallbackEntry.translations;
+            return fallbackEntry;
+        }
+
+        const dictionaryResponse = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(normalizedWord)}`);
+        if (!dictionaryResponse.ok) {
+            const fallbackEntry = buildMockWordEntry(normalizedWord);
+            const translations = await translationVariantsPromise;
+            fallbackEntry.translations = translations.length ? translations : fallbackEntry.translations;
+            return fallbackEntry;
+        }
+
+        const dictionaryPayload = await dictionaryResponse.json();
+        const entry = Array.isArray(dictionaryPayload) ? dictionaryPayload[0] : null;
+        const firstMeaning = entry?.meanings?.[0];
+        const firstDefinition = firstMeaning?.definitions?.[0]?.definition;
+        const translations = await translationVariantsPromise;
+
+        return {
+            lemma: entry?.word || normalizedWord,
+            partOfSpeech: firstMeaning?.partOfSpeech || inferPartOfSpeech(normalizedWord),
+            contextualMeaning: firstDefinition || `Context meaning: ${titleCase(normalizedWord)}`,
+            translations: translations.length ? translations : buildMockWordEntry(normalizedWord).translations
+        };
+    }
+
+    private async fetchTranslationVariants(word: string, sourceLanguage: string, targetLanguage: string) {
+        const url = new URL('https://api.mymemory.translated.net/get');
+        url.searchParams.set('q', word);
+        url.searchParams.set('langpair', `${sourceLanguage}|${targetLanguage}`);
+
+        const response = await fetch(url.toString());
+        if (!response.ok) {
+            return [];
+        }
+
+        const payload = await response.json();
+        const variants = [
+            payload?.responseData?.translatedText,
+            ...(payload?.matches || []).map((match: { translation?: string }) => match.translation)
+        ]
+            .filter(Boolean)
+            .map((value: string) => value.trim())
+            .filter((value: string, index: number, list: string[]) => list.indexOf(value) === index)
+            .slice(0, 5);
+
+        return variants;
     }
 
     private onOverlayClick(event: Event) {
@@ -221,8 +332,8 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
     }
 
     private async translateSubtitleText(text: string) {
-        const sourceLanguage = currentSettings.pauseTranslateSourceLanguage();
-        const targetLanguage = currentSettings.pauseTranslateTargetLanguage();
+        const sourceLanguage = getSourceLanguage();
+        const targetLanguage = getTargetLanguage();
 
         if (this.translationCache.has(text)) {
             return this.translationCache.get(text) as string;
