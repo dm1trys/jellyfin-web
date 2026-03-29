@@ -72,3 +72,23 @@ Jellyfin Web is the frontend used for most of the clients available for end user
    ```
 
 Review the [Contributing Guide](./CONTRIBUTING.md) for more information on our process and tech stack.
+
+## Fork Workflow
+
+This fork includes a custom pause-translate experience for subtitle learning.
+
+- Main feature code lives in `src/apps/stable/features/playback/pauseTranslate/`
+- Legacy compatibility import remains in `src/apps/stable/features/playback/utils/pauseTranslateSubscriber.ts`
+- Local Windows helper to run Jellyfin against the built fork lives in `tools/windows/start-jellyfin-with-custom-webdir.ps1`
+
+Typical local flow:
+
+```sh
+npm run build:production
+```
+
+Then on Windows:
+
+```powershell
+.\tools\windows\start-jellyfin-with-custom-webdir.ps1
+```
