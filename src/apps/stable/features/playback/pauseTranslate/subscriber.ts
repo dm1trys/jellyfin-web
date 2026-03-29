@@ -4,9 +4,9 @@ import { currentSettings } from 'scripts/settings/userSettings';
 
 import { PlaybackSubscriber } from '../utils/playbackSubscriber';
 import { PauseTranslateOverlay } from './overlay';
-import { fetchWordInspectorEntry, translateSubtitleText } from './providers';
+import { analyzePauseTranslation } from './providers';
 import { normalizeSubtitleText, tokenizeWords } from './text';
-import type { WordInspectorEntry } from './types';
+import type { PauseTranslateAnalysis } from './types';
 
 const getSourceLanguage = () => {
     const language = currentSettings.pauseTranslateSourceLanguage();
@@ -20,12 +20,12 @@ const getTargetLanguage = () => {
 
 class PauseTranslateSubscriber extends PlaybackSubscriber {
     private readonly overlay: PauseTranslateOverlay;
-    private translationCache = new Map<string, string>();
-    private wordEntryCache = new Map<string, WordInspectorEntry>();
+    private analysisCache = new Map<string, PauseTranslateAnalysis>();
     private lastVisibleSubtitleText = '';
     private lastRenderedSubtitleText = '';
     private activeRequestId = 0;
     private selectedWord?: string;
+    private currentAnalysis?: PauseTranslateAnalysis;
 
     constructor(playbackManager: PlaybackManager) {
         super(playbackManager);
@@ -45,30 +45,13 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
             return;
         }
 
-        this.overlay.renderInspectorLoading(this.selectedWord);
-        void this.loadWordInspectorEntry(this.selectedWord);
-    }
-
-    private async loadWordInspectorEntry(word: string) {
-        const sourceLanguage = getSourceLanguage();
-        const targetLanguage = getTargetLanguage();
-        const cacheKey = `${sourceLanguage}|${targetLanguage}|${word.toLowerCase()}`;
-
-        if (this.wordEntryCache.has(cacheKey)) {
-            this.overlay.renderInspectorEntry(this.wordEntryCache.get(cacheKey) as WordInspectorEntry);
+        const entry = this.currentAnalysis?.inspectorByWord[this.selectedWord.toLowerCase()];
+        if (entry) {
+            this.overlay.renderInspectorEntry(entry);
             return;
         }
 
-        try {
-            const entry = await fetchWordInspectorEntry(word, sourceLanguage, targetLanguage);
-            this.wordEntryCache.set(cacheKey, entry);
-
-            if (this.selectedWord?.toLowerCase() === word.toLowerCase()) {
-                this.overlay.renderInspectorEntry(entry);
-            }
-        } catch (error) {
-            console.error('[PauseTranslateSubscriber] word inspector error', error);
-        }
+        this.overlay.renderInspectorError(this.selectedWord, 'Word details could not be loaded right now.');
     }
 
     private getVisibleSubtitleText(player?: PlayerPlugin) {
@@ -87,6 +70,9 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
             return;
         }
 
+        const sourceLanguage = getSourceLanguage();
+        const targetLanguage = getTargetLanguage();
+        const cacheKey = `${sourceLanguage}|${targetLanguage}|${subtitleText}`;
         this.lastRenderedSubtitleText = subtitleText;
         const requestId = ++this.activeRequestId;
         this.overlay.show(subtitleText, 'Translating...', 'loading');
@@ -96,29 +82,33 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
             this.selectedWord = words[0];
             this.overlay.setSelectedWord(this.selectedWord);
         }
-        this.renderWordInspector();
+        this.overlay.renderInspectorLoading(this.selectedWord || '');
 
         try {
-            const translated = await translateSubtitleText(
-                subtitleText,
-                getSourceLanguage(),
-                getTargetLanguage(),
-                this.translationCache
-            );
+            const analysis = this.analysisCache.has(cacheKey)
+                ? this.analysisCache.get(cacheKey) as PauseTranslateAnalysis
+                : await analyzePauseTranslation(subtitleText, sourceLanguage, targetLanguage);
             if (requestId !== this.activeRequestId) {
                 return;
             }
 
-            this.overlay.show(subtitleText, translated, 'ready');
+            this.analysisCache.set(cacheKey, analysis);
+            this.currentAnalysis = analysis;
+            this.overlay.show(subtitleText, analysis.translatedText, 'ready');
             this.overlay.setSelectedWord(this.selectedWord);
+            this.renderWordInspector();
         } catch (error) {
-            console.error('[PauseTranslateSubscriber] translation error', error);
+            console.error('[PauseTranslateSubscriber] analysis error', error);
             if (requestId !== this.activeRequestId) {
                 return;
             }
 
+            this.currentAnalysis = undefined;
             this.overlay.show(subtitleText, 'Could not translate this subtitle right now.', 'error');
             this.overlay.setSelectedWord(this.selectedWord);
+            if (this.selectedWord) {
+                this.overlay.renderInspectorError(this.selectedWord, 'Word details could not be loaded right now.');
+            }
         }
     }
 
@@ -134,6 +124,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
     onPlayerChange() {
         this.lastVisibleSubtitleText = '';
         this.lastRenderedSubtitleText = '';
+        this.currentAnalysis = undefined;
         this.selectedWord = undefined;
         this.hideOverlay();
     }
@@ -146,6 +137,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
     onPlayerPlaybackStop() {
         this.lastVisibleSubtitleText = '';
         this.lastRenderedSubtitleText = '';
+        this.currentAnalysis = undefined;
         this.selectedWord = undefined;
         this.hideOverlay();
     }
@@ -153,6 +145,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
     onPlayerStopped() {
         this.lastVisibleSubtitleText = '';
         this.lastRenderedSubtitleText = '';
+        this.currentAnalysis = undefined;
         this.selectedWord = undefined;
         this.hideOverlay();
     }
@@ -171,6 +164,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
 
     onPlayerUnpause() {
         this.lastRenderedSubtitleText = '';
+        this.currentAnalysis = undefined;
         this.selectedWord = undefined;
         this.hideOverlay();
     }

@@ -1,5 +1,49 @@
 import type { WiktApiEntry } from './types';
-import { titleCase, uniqueValues } from './text';
+import { titleCase, tokenizeWords, uniqueValues } from './text';
+
+const SEPARABLE_PREFIXES = new Set([
+    'ab',
+    'an',
+    'auf',
+    'aus',
+    'bei',
+    'da',
+    'dabei',
+    'daran',
+    'darauf',
+    'durch',
+    'ein',
+    'empor',
+    'entgegen',
+    'entlang',
+    'fehl',
+    'fern',
+    'fest',
+    'fort',
+    'frei',
+    'gegenüber',
+    'gleich',
+    'heim',
+    'her',
+    'hin',
+    'hoch',
+    'los',
+    'mit',
+    'nach',
+    'nieder',
+    'statt',
+    'teil',
+    'tot',
+    'um',
+    'unter',
+    'vor',
+    'weg',
+    'weiter',
+    'wieder',
+    'zu',
+    'zurück',
+    'zusammen'
+]);
 
 export const getFirstGloss = (entry?: WiktApiEntry) => entry?.senses
     ?.flatMap((sense) => sense.glosses || [])
@@ -67,4 +111,40 @@ export const getGermanGrammarTags = (entry: WiktApiEntry, sourceEntry?: WiktApiE
     }
 
     return uniqueValues(tags).slice(0, 6);
+};
+
+const isLikelyGermanVerbForm = (entry?: WiktApiEntry) => (
+    entry?.pos === 'verb'
+    || entry?.senses?.some((sense) => sense.tags?.includes('present') || sense.tags?.includes('past') || sense.tags?.includes('imperative'))
+);
+
+export const resolveGermanSeparableVerb = (
+    normalizedWord: string,
+    phrase: string,
+    sourceEntry?: WiktApiEntry,
+    baseWord?: string
+) => {
+    if (!phrase || !isLikelyGermanVerbForm(sourceEntry) || !baseWord || baseWord === normalizedWord) {
+        return null;
+    }
+
+    const words = tokenizeWords(phrase).map((word) => word.toLowerCase());
+    const selectedIndex = words.indexOf(normalizedWord);
+    if (selectedIndex === -1) {
+        return null;
+    }
+
+    for (let index = words.length - 1; index > selectedIndex; index--) {
+        const candidatePrefix = words[index];
+        if (!SEPARABLE_PREFIXES.has(candidatePrefix)) {
+            continue;
+        }
+
+        return {
+            combinedLemma: `${candidatePrefix}${baseWord}`,
+            prefix: candidatePrefix
+        };
+    }
+
+    return null;
 };

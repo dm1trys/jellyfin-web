@@ -8,6 +8,12 @@ export type WordInspectorEntry = {
     grammarTags?: string[]
 };
 
+export type PauseTranslateAnalysis = {
+    translatedText: string
+    tokens: string[]
+    inspectorByWord: Record<string, WordInspectorEntry>
+};
+
 export type WiktApiSense = {
     glosses?: string[]
     tags?: string[]

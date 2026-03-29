@@ -66,6 +66,26 @@ export class PauseTranslateOverlay {
         this.inspectorTranslationsNode.innerHTML = '';
     }
 
+    renderInspectorError(word: string, message: string) {
+        if (
+            !this.inspectorNode
+            || !this.inspectorWordNode
+            || !this.inspectorPartOfSpeechNode
+            || !this.inspectorMetaNode
+            || !this.inspectorContextNode
+            || !this.inspectorTranslationsNode
+        ) {
+            return;
+        }
+
+        this.inspectorNode.classList.remove('hide');
+        this.inspectorWordNode.textContent = word.toLowerCase();
+        this.inspectorPartOfSpeechNode.textContent = 'error';
+        this.inspectorMetaNode.innerHTML = '';
+        this.inspectorContextNode.textContent = message;
+        this.inspectorTranslationsNode.innerHTML = '';
+    }
+
     renderInspectorEntry(entry: WordInspectorEntry) {
         if (
             !this.inspectorWordNode

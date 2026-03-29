@@ -1,9 +1,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
+const https = require('node:https');
 
 const distDir = path.join(__dirname, 'dist');
 const port = 8097;
+const serverHost = '192.168.1.41';
+const lookupTimeoutMs = 8000;
 
 const contentTypes = {
     '.css': 'text/css; charset=utf-8',
@@ -35,6 +38,318 @@ const safeResolve = (requestPath) => {
     return resolved;
 };
 
+const normalizeSubtitleText = (text) => text
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+
+const tokenizeWords = (text) => (
+    text.match(/[A-Za-zÀ-ÿ'-]+/g) || []
+);
+
+const uniqueValues = (values) => values
+    .filter((value) => typeof value === 'string' && value.trim())
+    .map((value) => value.trim())
+    .filter((value, index, list) => list.indexOf(value) === index);
+
+const inferPartOfSpeech = (word) => {
+    const lower = word.toLowerCase();
+
+    if (/(ing|ed)$/.test(lower)) return 'verb';
+    if (/ly$/.test(lower)) return 'adverb';
+    if (/(ous|ful|able|al|ive|less|ic)$/.test(lower)) return 'adjective';
+    if (/(tion|ment|ness|ship|ity|er|or)$/.test(lower)) return 'noun';
+    return 'word';
+};
+
+const titleCase = (value) => (
+    value.charAt(0).toUpperCase() + value.slice(1)
+);
+
+const SEPARABLE_PREFIXES = new Set([
+    'ab', 'an', 'auf', 'aus', 'bei', 'da', 'dabei', 'daran', 'darauf', 'durch',
+    'ein', 'empor', 'entgegen', 'entlang', 'fehl', 'fern', 'fest', 'fort', 'frei',
+    'gegenüber', 'gleich', 'heim', 'her', 'hin', 'hoch', 'los', 'mit', 'nach',
+    'nieder', 'statt', 'teil', 'tot', 'um', 'unter', 'vor', 'weg', 'weiter',
+    'wieder', 'zu', 'zurück', 'zusammen'
+]);
+
+const toTrimmedString = (value) => (
+    typeof value === 'string' ? value.trim() : ''
+);
+
+const getFirstGloss = (entry) => entry?.senses
+    ?.flatMap((sense) => sense.glosses || [])
+    ?.find(Boolean);
+
+const getGermanBaseWord = (entry) => entry?.senses
+    ?.flatMap((sense) => sense.form_of || [])
+    ?.map((candidate) => candidate.word)
+    ?.find(Boolean);
+
+const getGermanLemma = (entry, normalizedWord) => {
+    const lemma = entry?.word || normalizedWord;
+    const article = entry?.forms
+        ?.find((form) => form.tags?.includes('nominative') && form.tags?.includes('singular') && form.article)
+        ?.article;
+
+    return article ? `${article} ${lemma}` : lemma;
+};
+
+const getGermanPluralForm = (entry) => entry?.forms
+    ?.find((form) => form.tags?.includes('nominative') && form.tags?.includes('plural'))
+    ?.form;
+
+const formatGermanGrammarTag = (tag) => {
+    const labels = {
+        active: 'Aktiv',
+        dative: 'Dativ',
+        'form-of': 'Form',
+        genitive: 'Genitiv',
+        imperative: 'Imperativ',
+        indicative: 'Indikativ',
+        nominative: 'Nominativ',
+        past: 'Prateritum',
+        perfect: 'Perfekt',
+        plural: 'Plural',
+        present: 'Prasens',
+        singular: 'Singular'
+    };
+
+    return labels[tag] || titleCase(tag);
+};
+
+const getGermanGrammarTags = (entry, sourceEntry) => {
+    const tags = [];
+    const article = entry?.forms
+        ?.find((form) => form.tags?.includes('nominative') && form.tags?.includes('singular') && form.article)
+        ?.article;
+    const pluralForm = getGermanPluralForm(entry);
+    const sourceSense = sourceEntry?.senses?.[0];
+
+    if (article) {
+        tags.push(article);
+    }
+
+    if (pluralForm && pluralForm !== entry?.word) {
+        tags.push(`Plural: ${pluralForm}`);
+    }
+
+    for (const tag of sourceSense?.tags || []) {
+        if (tag === 'form-of') {
+            continue;
+        }
+
+        tags.push(formatGermanGrammarTag(tag));
+    }
+
+    return uniqueValues(tags).slice(0, 6);
+};
+
+const isLikelyGermanVerbForm = (entry) => (
+    entry?.pos === 'verb'
+    || entry?.senses?.some((sense) => sense.tags?.includes('present') || sense.tags?.includes('past') || sense.tags?.includes('imperative'))
+);
+
+const resolveGermanSeparableVerb = (normalizedWord, phrase, sourceEntry, baseWord) => {
+    if (!phrase || !isLikelyGermanVerbForm(sourceEntry) || !baseWord || baseWord === normalizedWord) {
+        return null;
+    }
+
+    const words = tokenizeWords(phrase).map((word) => word.toLowerCase());
+    const selectedIndex = words.indexOf(normalizedWord);
+    if (selectedIndex === -1) {
+        return null;
+    }
+
+    for (let index = words.length - 1; index > selectedIndex; index--) {
+        const candidatePrefix = words[index];
+        if (!SEPARABLE_PREFIXES.has(candidatePrefix)) {
+            continue;
+        }
+
+        return {
+            combinedLemma: `${candidatePrefix}${baseWord}`,
+            prefix: candidatePrefix
+        };
+    }
+
+    return null;
+};
+
+const buildFallbackWordEntry = (word) => {
+    const normalized = word.toLowerCase();
+
+    return {
+        lemma: normalized,
+        partOfSpeech: inferPartOfSpeech(normalized),
+        contextualMeaning: `Context meaning: ${titleCase(normalized)}`,
+        translations: [
+            `${normalized} (main)`,
+            `${normalized} (context)`,
+            `${normalized} (literal)`
+        ]
+    };
+};
+
+const fetchJson = (url) => new Promise((resolve, reject) => {
+    const request = https.get(url, {
+        headers: {
+            'User-Agent': 'jellyfin-pause-translate-dev-server'
+        }
+    }, (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => {
+            const body = Buffer.concat(chunks).toString('utf8');
+            if (response.statusCode < 200 || response.statusCode >= 300) {
+                reject(new Error(`Request failed with ${response.statusCode}: ${url}`));
+                return;
+            }
+
+            try {
+                resolve(JSON.parse(body));
+            } catch (error) {
+                reject(error);
+            }
+        });
+    });
+
+    request.setTimeout(lookupTimeoutMs, () => {
+        request.destroy(new Error(`Request timed out: ${url}`));
+    });
+    request.on('error', reject);
+});
+
+const fetchTranslationText = async (text, sourceLanguage, targetLanguage) => {
+    const url = new URL('https://api.mymemory.translated.net/get');
+    url.searchParams.set('q', text);
+    url.searchParams.set('langpair', `${sourceLanguage}|${targetLanguage}`);
+
+    const payload = await fetchJson(url.toString());
+    return payload?.responseData?.translatedText
+        || payload?.matches?.find((match) => match.translation)?.translation
+        || text;
+};
+
+const fetchTranslationVariants = async (word, sourceLanguage, targetLanguage) => {
+    const url = new URL('https://api.mymemory.translated.net/get');
+    url.searchParams.set('q', word);
+    url.searchParams.set('langpair', `${sourceLanguage}|${targetLanguage}`);
+
+    try {
+        const payload = await fetchJson(url.toString());
+        return uniqueValues([
+            payload?.responseData?.translatedText,
+            ...(payload?.matches || []).map((match) => match.translation)
+        ]).slice(0, 5);
+    } catch (error) {
+        return [];
+    }
+};
+
+const fetchGermanWordEntry = async (word, targetLanguage, phrase) => {
+    const normalizedWord = word.toLowerCase();
+    const sourcePayload = await fetchJson(`https://api.wiktapi.dev/v1/de/word/${encodeURIComponent(normalizedWord)}?lang=de`);
+    const sourceEntry = (sourcePayload?.entries || []).find((candidate) => candidate?.senses?.length);
+    const baseWord = getGermanBaseWord(sourceEntry);
+    const separableVerb = resolveGermanSeparableVerb(normalizedWord, phrase, sourceEntry, baseWord);
+    const preferredLookupWord = separableVerb?.combinedLemma || baseWord || normalizedWord;
+
+    let entry = (sourcePayload?.entries || []).find((candidate) => candidate?.pos && candidate?.senses?.length);
+    if (preferredLookupWord.toLowerCase() !== normalizedWord) {
+        try {
+            const basePayload = await fetchJson(`https://api.wiktapi.dev/v1/de/word/${encodeURIComponent(preferredLookupWord)}?lang=de`);
+            entry = (basePayload?.entries || []).find((candidate) => candidate?.pos && candidate?.senses?.length) || entry;
+        } catch (error) {
+            // Keep the source entry as fallback when combined lemma lookup fails.
+        }
+    }
+
+    const translationVariants = await fetchTranslationVariants(preferredLookupWord, 'de', targetLanguage);
+    if (!entry) {
+        const fallbackEntry = buildFallbackWordEntry(normalizedWord);
+        fallbackEntry.translations = translationVariants.length ? translationVariants : fallbackEntry.translations;
+        if (separableVerb) {
+            fallbackEntry.lemma = separableVerb.combinedLemma;
+            fallbackEntry.grammarTags = [`Trennbar: ${separableVerb.prefix}-`];
+        }
+        return fallbackEntry;
+    }
+
+    const glossaryTranslations = uniqueValues(
+        (entry.translations || [])
+            .filter((translation) => translation.lang_code === targetLanguage)
+            .map((translation) => translation.word)
+    );
+
+    return {
+        lemma: getGermanLemma(entry, preferredLookupWord),
+        partOfSpeech: entry.pos || inferPartOfSpeech(normalizedWord),
+        contextualMeaning: getFirstGloss(entry) || `Kontextbedeutung: ${titleCase(preferredLookupWord)}`,
+        translations: uniqueValues([
+            ...glossaryTranslations,
+            ...translationVariants
+        ]).slice(0, 5),
+        grammarTags: uniqueValues([
+            separableVerb ? `Trennbar: ${separableVerb.prefix}-` : undefined,
+            ...getGermanGrammarTags(entry, sourceEntry)
+        ])
+    };
+};
+
+const buildInspectorByWord = async (tokens, phrase, sourceLanguage, targetLanguage) => {
+    const inspectorByWord = {};
+
+    for (const token of tokens) {
+        const key = token.toLowerCase();
+        if (inspectorByWord[key]) {
+            continue;
+        }
+
+        try {
+            if (sourceLanguage === 'de') {
+                inspectorByWord[key] = await fetchGermanWordEntry(key, targetLanguage, phrase);
+            } else {
+                const fallbackEntry = buildFallbackWordEntry(key);
+                const translations = await fetchTranslationVariants(key, sourceLanguage, targetLanguage);
+                fallbackEntry.translations = translations.length ? translations : fallbackEntry.translations;
+                inspectorByWord[key] = fallbackEntry;
+            }
+        } catch (error) {
+            inspectorByWord[key] = buildFallbackWordEntry(key);
+        }
+    }
+
+    return inspectorByWord;
+};
+
+const readJsonBody = (request) => new Promise((resolve, reject) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+        try {
+            const body = Buffer.concat(chunks).toString('utf8');
+            resolve(body ? JSON.parse(body) : {});
+        } catch (error) {
+            reject(error);
+        }
+    });
+    request.on('error', reject);
+});
+
+const sendJson = (response, statusCode, payload) => {
+    response.writeHead(statusCode, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store'
+    });
+    response.end(JSON.stringify(payload));
+};
+
 const sendFile = (response, filePath) => {
     fs.readFile(filePath, (error, data) => {
         if (error) {
@@ -52,7 +367,36 @@ const sendFile = (response, filePath) => {
     });
 };
 
-http.createServer((request, response) => {
+http.createServer(async (request, response) => {
+    if (request.method === 'POST' && request.url === '/api/pause-translate/analyze') {
+        try {
+            const body = await readJsonBody(request);
+            const phrase = normalizeSubtitleText(toTrimmedString(body.phrase));
+            const sourceLanguage = toTrimmedString(body.sourceLanguage) || 'en';
+            const targetLanguage = toTrimmedString(body.targetLanguage) || 'uk';
+
+            if (!phrase) {
+                sendJson(response, 400, { error: 'Phrase is required' });
+                return;
+            }
+
+            const tokens = tokenizeWords(phrase);
+            const translatedText = await fetchTranslationText(phrase, sourceLanguage, targetLanguage);
+            const inspectorByWord = await buildInspectorByWord(tokens, phrase, sourceLanguage, targetLanguage);
+
+            sendJson(response, 200, {
+                translatedText,
+                tokens,
+                inspectorByWord
+            });
+        } catch (error) {
+            sendJson(response, 502, {
+                error: error instanceof Error ? error.message : 'Pause translate analysis failed'
+            });
+        }
+        return;
+    }
+
     const resolvedPath = safeResolve(request.url || '/');
     if (!resolvedPath) {
         response.writeHead(403);
@@ -68,6 +412,6 @@ http.createServer((request, response) => {
 
         sendFile(response, path.join(distDir, 'index.html'));
     });
-}).listen(port, '127.0.0.1', () => {
-    console.log(`Serving Jellyfin web client at http://127.0.0.1:${port}`);
+}).listen(port, '0.0.0.0', () => {
+    console.log(`Serving Jellyfin web client at http://${serverHost}:${port}`);
 });
