@@ -1,0 +1,84 @@
+diff --git a/packages/api/routes/v1/[edition]/word/[word].get.ts b/packages/api/routes/v1/[edition]/word/[word].get.ts
+index 1295fec..c560e24 100644
+--- a/packages/api/routes/v1/[edition]/word/[word].get.ts
++++ b/packages/api/routes/v1/[edition]/word/[word].get.ts
+@@ -57,7 +57,7 @@ defineRouteMeta({
+ 
+ export default defineHandler((event) => {
+   const edition = getRouterParam(event, "edition")!;
+-  const word = getRouterParam(event, "word")!;
++  const word = getRouterParam(event, "word", { decode: true })!;
+   const { lang } = getQuery(event) as { lang?: string };
+ 
+   const entries = fetchWordEntries(edition, word, lang).map((r) => ({
+diff --git a/packages/api/routes/v1/[edition]/word/[word]/definitions.get.ts b/packages/api/routes/v1/[edition]/word/[word]/definitions.get.ts
+index 2829e04..05222d4 100644
+--- a/packages/api/routes/v1/[edition]/word/[word]/definitions.get.ts
++++ b/packages/api/routes/v1/[edition]/word/[word]/definitions.get.ts
+@@ -73,7 +73,7 @@ defineRouteMeta({
+ 
+ export default defineHandler((event) => {
+   const edition = getRouterParam(event, "edition")!;
+-  const word = getRouterParam(event, "word")!;
++  const word = getRouterParam(event, "word", { decode: true })!;
+   const { lang } = getQuery(event) as { lang?: string };
+ 
+   const definitions = fetchWordEntries(edition, word, lang).map((r) => ({
+diff --git a/packages/api/routes/v1/[edition]/word/[word]/forms.get.ts b/packages/api/routes/v1/[edition]/word/[word]/forms.get.ts
+index ebe9a8a..59b8d6a 100644
+--- a/packages/api/routes/v1/[edition]/word/[word]/forms.get.ts
++++ b/packages/api/routes/v1/[edition]/word/[word]/forms.get.ts
+@@ -63,7 +63,7 @@ defineRouteMeta({
+ 
+ export default defineHandler((event) => {
+   const edition = getRouterParam(event, "edition")!;
+-  const word = getRouterParam(event, "word")!;
++  const word = getRouterParam(event, "word", { decode: true })!;
+   const { lang } = getQuery(event) as { lang?: string };
+ 
+   const forms = fetchWordEntries(edition, word, lang).map((r) => ({
+diff --git a/packages/api/routes/v1/[edition]/word/[word]/pronunciations.get.ts b/packages/api/routes/v1/[edition]/word/[word]/pronunciations.get.ts
+index ac2b70b..90ec983 100644
+--- a/packages/api/routes/v1/[edition]/word/[word]/pronunciations.get.ts
++++ b/packages/api/routes/v1/[edition]/word/[word]/pronunciations.get.ts
+@@ -72,7 +72,7 @@ defineRouteMeta({
+ 
+ export default defineHandler((event) => {
+   const edition = getRouterParam(event, "edition")!;
+-  const word = getRouterParam(event, "word")!;
++  const word = getRouterParam(event, "word", { decode: true })!;
+   const { lang } = getQuery(event) as { lang?: string };
+ 
+   const pronunciations = fetchWordEntries(edition, word, lang).map((r) => ({
+diff --git a/packages/api/routes/v1/[edition]/word/[word]/translations.get.ts b/packages/api/routes/v1/[edition]/word/[word]/translations.get.ts
+index 5a73b9a..81c7509 100644
+--- a/packages/api/routes/v1/[edition]/word/[word]/translations.get.ts
++++ b/packages/api/routes/v1/[edition]/word/[word]/translations.get.ts
+@@ -62,7 +62,7 @@ defineRouteMeta({
+ 
+ export default defineHandler((event) => {
+   const edition = getRouterParam(event, "edition")!;
+-  const word = getRouterParam(event, "word")!;
++  const word = getRouterParam(event, "word", { decode: true })!;
+   const { lang } = getQuery(event) as { lang?: string };
+ 
+   const translations = fetchWordEntries(edition, word, lang).map((r) => ({
+diff --git a/packages/api/tests/routes/word.test.ts b/packages/api/tests/routes/word.test.ts
+index 397ebbb..e658fc5 100644
+--- a/packages/api/tests/routes/word.test.ts
++++ b/packages/api/tests/routes/word.test.ts
+@@ -35,6 +35,14 @@ describe("GET /v1/{edition}/word/{word}", () => {
+     const event = createTestEvent({ edition: "de", word: "chat" });
+     await expect(call(wordHandler, event)).rejects.toSatisfy((e: any) => e.statusCode === 404);
+   });
++
++  it("decodes percent-encoded path words", async () => {
++    const event = createTestEvent({ edition: "de", word: "sch%C3%B6n" }, { lang: "de" });
++    const result = wordHandler(event);
++
++    expect(result.word).toBe("schön");
++    expect(result.entries.length).toBeGreaterThan(0);
++  });
+ });
+ 
+ // ── /word/{word}/definitions ──────────────────────────────────────────────────

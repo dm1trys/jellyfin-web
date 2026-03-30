@@ -7,7 +7,10 @@ RUN corepack enable && corepack prepare pnpm@10.30.0 --activate
 
 WORKDIR /app
 
+COPY patches/wiktapi-decode-word-routes.patch /tmp/wiktapi-decode-word-routes.patch
+
 RUN git clone --depth 1 https://github.com/TheAlexLichter/wiktionary-api.git .
+RUN git apply /tmp/wiktapi-decode-word-routes.patch
 
 ENV LEFTHOOK=0
 RUN pnpm install --frozen-lockfile --ignore-scripts
