@@ -11,6 +11,32 @@ services:
       - ./media:/media
     restart: unless-stopped
 
+  wiktapi:
+    build:
+      context: .
+      dockerfile: Dockerfile.wiktapi
+      target: runtime
+    container_name: wiktapi
+    environment:
+      DATA_PATH: /data/wiktionary.db
+      PORT: 3000
+    volumes:
+      - ${WIKTAPI_DATA_DIR:-./wiktapi-data}:/data
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  wiktapi-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.wiktapi
+      target: worker
+    container_name: wiktapi-worker
+    volumes:
+      - ${WIKTAPI_DATA_DIR:-./wiktapi-data}:/app/packages/api/data
+    profiles:
+      - tools
+
   jellyfin-web:
     build:
       context: .
@@ -18,11 +44,13 @@ services:
     container_name: jellyfin-web
     depends_on:
       - jellyfin
+      - wiktapi
     environment:
       BIND_HOST: 0.0.0.0
       WEB_CLIENT_PORT: 8097
       DEEPL_API_KEY: ${DEEPL_API_KEY:-}
       DEEPL_API_URL: ${DEEPL_API_URL:-https://api-free.deepl.com/v2/translate}
+      WIKTAPI_BASE_URL: ${WIKTAPI_BASE_URL:-http://wiktapi:3000}
     ports:
       - "8097:8097"
     restart: unless-stopped

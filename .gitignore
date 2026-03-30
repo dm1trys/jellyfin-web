@@ -25,3 +25,4 @@ config.json
 .runtime/
 .runtime-web/
 .runtime-jellyfin/
+wiktapi-data/

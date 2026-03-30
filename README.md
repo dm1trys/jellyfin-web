@@ -281,11 +281,26 @@ Then edit `.env` and set:
 ```dotenv
 DEEPL_API_KEY=your_deepl_api_key
 DEEPL_API_URL=https://api-free.deepl.com/v2/translate
+WIKTAPI_BASE_URL=http://wiktapi:3000
+WIKTAPI_DATA_DIR=./wiktapi-data
 ```
 
 `.env` is ignored by git and will be picked up automatically by `docker compose`.
 
-Start backend + custom web client:
+For self-hosted WiktApi, place the SQLite database at:
+
+```text
+./wiktapi-data/wiktionary.db
+```
+
+The stack mounts that directory into the `wiktapi` container at `/data`, which matches the official self-hosting guide. WiktApi listens on `3000` and `jellyfin-web` is configured to use `http://wiktapi:3000` inside the compose network.
+
+If you do not have the database yet, the official WiktApi guide says to build it from the upstream repo by downloading/importing editions, then run the server with `/data/wiktionary.db` mounted:
+
+- [WiktApi Self-Hosting](https://wiktapi.dev/guides/self-hosting.html)
+- [WiktApi Quickstart](https://wiktapi.dev/quickstart.html)
+
+Start backend + custom web client + self-hosted WiktApi:
 
 ```sh
 docker compose up --build -d
@@ -295,6 +310,7 @@ This starts:
 
 - Jellyfin backend on `http://127.0.0.1:8096`
 - custom web client on `http://127.0.0.1:8097`
+- self-hosted WiktApi on `http://127.0.0.1:3000`
 
 Stop everything:
 
@@ -307,6 +323,7 @@ Useful commands:
 ```sh
 docker compose logs -f jellyfin
 docker compose logs -f jellyfin-web
+docker compose logs -f wiktapi
 ```
 
 Notes:
@@ -314,4 +331,14 @@ Notes:
 - [`docker-compose.yml`](/home/dmitrys/work/jellyfin-web/docker-compose.yml) mounts `./media` into the backend container as `/media`
 - backend config and cache are stored in Docker volumes `jellyfin_config` and `jellyfin_cache`
 - phrase translation uses DeepL when `DEEPL_API_KEY` is set and falls back to MyMemory otherwise
+- word inspector uses the self-hosted WiktApi service from the compose network when `WIKTAPI_BASE_URL` points to `http://wiktapi:3000`
 - if you rebuild the web client, run `docker compose up --build -d` again
+
+Optional tooling container for WiktApi data management:
+
+```sh
+docker compose --profile tools run --rm wiktapi-worker node scripts/download_kaikki.ts --editions de
+docker compose --profile tools run --rm wiktapi-worker node scripts/import_data.ts --edition de
+```
+
+That worker writes into the same `WIKTAPI_DATA_DIR`, so the runtime container can immediately use the generated `wiktionary.db`.

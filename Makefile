@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help install build build-check build-dev lint test stylelint docker-build docker-up docker-web docker-down docker-logs web-start web-stop package
+.PHONY: help install build build-check build-dev lint test stylelint docker-build docker-up docker-web docker-down docker-logs wiktapi-logs web-start web-stop package
 
 NPM ?= npm
 NODE_OPTIONS ?= --max-old-space-size=4096
@@ -17,10 +17,11 @@ help:
 		'make stylelint     - run stylelint' \
 		'make package       - archive dist into $(ARCHIVE)' \
 		'make docker-build  - rebuild jellyfin-web docker image' \
-		'make docker-up     - start backend + web via docker compose' \
+		'make docker-up     - start backend + web + wiktapi via docker compose' \
 		'make docker-web    - rebuild and restart only jellyfin-web container' \
 		'make docker-down   - stop docker compose services' \
 		'make docker-logs   - tail jellyfin-web logs' \
+		'make wiktapi-logs  - tail self-hosted wiktapi logs' \
 		'make web-start     - start local custom web client helper' \
 		'make web-stop      - stop local custom web client helper'
 
@@ -62,6 +63,9 @@ docker-down:
 
 docker-logs:
 	docker compose logs -f jellyfin-web
+
+wiktapi-logs:
+	docker compose logs -f wiktapi
 
 web-start:
 	./tools/linux/start-jellyfin-with-custom-webdir.sh

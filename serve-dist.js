@@ -6,6 +6,7 @@ const https = require('node:https');
 const distDir = path.join(__dirname, 'dist');
 const port = Number(process.env.WEB_CLIENT_PORT || 8097);
 const bindHost = process.env.BIND_HOST || '0.0.0.0';
+const wiktApiBaseUrl = (process.env.WIKTAPI_BASE_URL || 'https://api.wiktapi.dev').replace(/\/+$/, '');
 const lookupTimeoutMs = 8000;
 
 const contentTypes = {
@@ -660,13 +661,13 @@ const fetchTranslationVariants = async (word, sourceLanguage, targetLanguage) =>
 };
 
 const fetchGermanExactEntry = async (word, originalToken = word) => {
-    const payload = await fetchJson(`https://api.wiktapi.dev/v1/de/word/${encodeURIComponent(word)}?lang=de`);
+    const payload = await fetchJson(`${wiktApiBaseUrl}/v1/de/word/${encodeURIComponent(word)}?lang=de`);
     const entry = selectGermanEntry(payload?.entries || [], word.toLocaleLowerCase('de-DE'), originalToken);
     return entry ? { payload, entry, resolvedWord: word } : null;
 };
 
 const fetchGermanSearchEntry = async (word, originalToken = word) => {
-    const payload = await fetchJson(`https://api.wiktapi.dev/v1/de/search?q=${encodeURIComponent(word)}&lang=de`);
+    const payload = await fetchJson(`${wiktApiBaseUrl}/v1/de/search?q=${encodeURIComponent(word)}&lang=de`);
     const results = Array.isArray(payload) ? payload : payload?.results || payload?.entries || [];
     const normalizedQuery = word.toLocaleLowerCase('de-DE');
     const bestMatch = results.find((result) => typeof result?.word === 'string' && result.word.toLocaleLowerCase('de-DE') === normalizedQuery)
