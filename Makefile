@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help install build build-check build-dev lint test stylelint docker-build docker-up docker-web docker-down docker-logs wiktapi-logs web-start web-stop package
+.PHONY: help install build build-check build-dev lint test stylelint docker-build docker-up docker-web docker-down docker-logs wiktapi-logs stanza-logs web-start web-stop package
 
 NPM ?= npm
 NODE_OPTIONS ?= --max-old-space-size=4096
@@ -22,6 +22,7 @@ help:
 		'make docker-down   - stop docker compose services' \
 		'make docker-logs   - tail jellyfin-web logs' \
 		'make wiktapi-logs  - tail self-hosted wiktapi logs' \
+		'make stanza-logs   - tail stanza morphology logs' \
 		'make web-start     - start local custom web client helper' \
 		'make web-stop      - stop local custom web client helper'
 
@@ -66,6 +67,9 @@ docker-logs:
 
 wiktapi-logs:
 	docker compose logs -f wiktapi
+
+stanza-logs:
+	docker compose logs -f stanza-morph
 
 web-start:
 	./tools/linux/start-jellyfin-with-custom-webdir.sh

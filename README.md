@@ -283,6 +283,7 @@ DEEPL_API_KEY=your_deepl_api_key
 DEEPL_API_URL=https://api-free.deepl.com/v2/translate
 WIKTAPI_BASE_URL=http://wiktapi:3000
 WIKTAPI_DATA_DIR=./wiktapi-data
+STANZA_BASE_URL=http://stanza-morph:5000
 ```
 
 `.env` is ignored by git and will be picked up automatically by `docker compose`.
@@ -311,6 +312,7 @@ This starts:
 - Jellyfin backend on `http://127.0.0.1:8096`
 - custom web client on `http://127.0.0.1:8097`
 - self-hosted WiktApi on `http://127.0.0.1:3000`
+- Stanza morphology service on `http://127.0.0.1:5000`
 
 Stop everything:
 
@@ -324,6 +326,7 @@ Useful commands:
 docker compose logs -f jellyfin
 docker compose logs -f jellyfin-web
 docker compose logs -f wiktapi
+docker compose logs -f stanza-morph
 ```
 
 Notes:
@@ -332,6 +335,7 @@ Notes:
 - backend config and cache are stored in Docker volumes `jellyfin_config` and `jellyfin_cache`
 - phrase translation uses DeepL when `DEEPL_API_KEY` is set and falls back to MyMemory otherwise
 - word inspector uses the self-hosted WiktApi service from the compose network when `WIKTAPI_BASE_URL` points to `http://wiktapi:3000`
+- German morphology is enriched with a self-hosted Stanza service when `STANZA_BASE_URL` points to `http://stanza-morph:5000`
 - if you rebuild the web client, run `docker compose up --build -d` again
 
 Optional tooling container for WiktApi data management:

@@ -26,3 +26,7 @@ config.json
 .runtime-web/
 .runtime-jellyfin/
 wiktapi-data/
+
+# python
+__pycache__/
+*.py[cod]

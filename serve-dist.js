@@ -8,6 +8,7 @@ const port = Number(process.env.WEB_CLIENT_PORT || 8097);
 const bindHost = process.env.BIND_HOST || '0.0.0.0';
 const lookupTimeoutMs = 8000;
 const wiktApiBaseUrl = (process.env.WIKTAPI_BASE_URL || 'https://api.wiktapi.dev').replace(/\/+$/, '');
+const stanzaBaseUrl = (process.env.STANZA_BASE_URL || '').replace(/\/+$/, '');
 
 const contentTypes = {
     '.css': 'text/css; charset=utf-8',
@@ -208,8 +209,77 @@ const getGermanLookupCandidates = (normalizedWord, originalToken = normalizedWor
     return uniqueValues(candidates);
 };
 
+const mapStanzaUposToPartOfSpeech = (upos) => {
+    const labels = {
+        ADJ: 'adjective',
+        ADP: 'preposition',
+        ADV: 'adverb',
+        AUX: 'verb',
+        CCONJ: 'conjunction',
+        DET: 'article',
+        INTJ: 'interjection',
+        NOUN: 'noun',
+        NUM: 'number',
+        PART: 'particle',
+        PRON: 'pronoun',
+        PROPN: 'proper noun',
+        SCONJ: 'conjunction',
+        VERB: 'verb'
+    };
+
+    return labels[upos] || '';
+};
+
+const formatGermanMorphFeatureTag = (key, value) => {
+    const valueLabels = {
+        Acc: 'Akkusativ',
+        Cmp: 'Komparativ',
+        Dat: 'Dativ',
+        Fem: 'Femininum',
+        Fin: 'Finit',
+        Gen: 'Genitiv',
+        Imp: 'Imperativ',
+        Ind: 'Indikativ',
+        Inf: 'Infinitiv',
+        Masc: 'Maskulinum',
+        Neut: 'Neutrum',
+        Nom: 'Nominativ',
+        Part: 'Partizip',
+        Past: 'Prateritum',
+        Pos: 'Positiv',
+        Plur: 'Plural',
+        Pres: 'Prasens',
+        Sing: 'Singular',
+        Sup: 'Superlativ'
+    };
+
+    if (key === 'Person' && value) {
+        return `${key}: ${value}`;
+    }
+
+    return valueLabels[value] || `${key}: ${value}`;
+};
+
+const getGermanMorphologyTags = (morphology) => {
+    if (!morphology?.feats || typeof morphology.feats !== 'object') {
+        return [];
+    }
+
+    return uniqueValues(
+        Object.entries(morphology.feats).map(([key, value]) => formatGermanMorphFeatureTag(key, value))
+    );
+};
+
 const inferGermanEntryPartOfSpeech = (entry, normalizedWord) => {
     const gloss = getFirstGloss(entry) || '';
+
+    if (/1\.\s*person singular|2\.\s*person singular|3\.\s*person singular|akkusativ der zweiten person singular|bezeichnet die eigene person|personalpronomen/i.test(gloss)) {
+        return 'pronoun';
+    }
+
+    if (/possessivpronomen/i.test(gloss)) {
+        return 'article';
+    }
 
     if (/ästhetisch|angenehme wirkung auf die sinne|angenehm, gut, anständig|ein hohes Gewicht habend|zu euch gehörig|euch gehörend|ähnlich sein|ähnlich werden|redensartlich für sehr/i.test(gloss)) {
         return 'adjective';
@@ -224,6 +294,10 @@ const inferGermanEntryPartOfSpeech = (entry, normalizedWord) => {
     }
 
     if (/hilfsverb/i.test(gloss)) {
+        return 'verb';
+    }
+
+    if (/en$/.test(normalizedWord) && /^[a-zäöüß].*[;,.]/i.test(gloss) && !/\bgenitiv\b|\bnominativ\b|\bdativ\b|\bakkusativ\b|\bdeklination\b/i.test(gloss)) {
         return 'verb';
     }
 
@@ -279,7 +353,16 @@ const getExpectedGermanFunctionWordPartOfSpeech = (normalizedWord) => {
     return null;
 };
 
-const scoreGermanEntry = (entry, normalizedWord, originalToken) => {
+const isRepeatedDirectAddressToken = (phrase, originalToken) => {
+    if (!phrase || !originalToken || !/^[A-ZÄÖÜ]/.test(originalToken)) {
+        return false;
+    }
+
+    const escaped = originalToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escaped}\\b\\s*,\\s*\\b${escaped}\\b\\s*,`, 'u').test(phrase);
+};
+
+const scoreGermanEntry = (entry, normalizedWord, originalToken, morphology = null, phrase = '') => {
     if (!entry?.senses?.length) {
         return Number.NEGATIVE_INFINITY;
     }
@@ -290,6 +373,8 @@ const scoreGermanEntry = (entry, normalizedWord, originalToken) => {
     const lowerCaseOriginal = isLowerCaseToken(originalToken || normalizedWord);
     const inferredPartOfSpeech = inferGermanEntryPartOfSpeech(entry, normalizedWord);
     const expectedFunctionWordPartOfSpeech = getExpectedGermanFunctionWordPartOfSpeech(normalizedWord);
+    const expectedMorphPartOfSpeech = mapStanzaUposToPartOfSpeech(morphology?.upos);
+    const repeatedDirectAddress = isRepeatedDirectAddressToken(phrase, originalToken);
     let score = 100;
 
     if (entry.pos) {
@@ -340,6 +425,10 @@ const scoreGermanEntry = (entry, normalizedWord, originalToken) => {
         score -= 70;
     }
 
+    if (/\bhöhenzug\b|\bgemeinde\b|\bobayern\b|\bnordrhein-westfalen\b/i.test(gloss)) {
+        score -= 140;
+    }
+
     if (lowerCaseOriginal && entry.word && /^[A-ZÄÖÜ]/.test(entry.word) && entry.word !== titleCase(normalizedWord)) {
         score -= 85;
     }
@@ -350,6 +439,50 @@ const scoreGermanEntry = (entry, normalizedWord, originalToken) => {
 
     if (expectedFunctionWordPartOfSpeech && inferredPartOfSpeech === expectedFunctionWordPartOfSpeech) {
         score += 90;
+    }
+
+    if (expectedMorphPartOfSpeech && inferredPartOfSpeech === expectedMorphPartOfSpeech) {
+        score += 120;
+    }
+
+    if (expectedMorphPartOfSpeech === 'verb' && inferredPartOfSpeech !== 'verb') {
+        score -= 130;
+    }
+
+    if (expectedMorphPartOfSpeech === 'verb' && !firstSenseTags.includes('form-of')) {
+        score += 110;
+    }
+
+    if (expectedMorphPartOfSpeech === 'verb' && firstSenseTags.includes('form-of')) {
+        score -= 40;
+    }
+
+    if (expectedMorphPartOfSpeech === 'noun' && inferredPartOfSpeech !== 'noun') {
+        score -= 45;
+    }
+
+    if (expectedMorphPartOfSpeech === 'pronoun' && inferredPartOfSpeech === 'pronoun') {
+        score += 140;
+    }
+
+    if (expectedMorphPartOfSpeech === 'pronoun' && inferredPartOfSpeech !== 'pronoun') {
+        score -= 120;
+    }
+
+    if (expectedMorphPartOfSpeech === 'article' && inferredPartOfSpeech === 'article') {
+        score += 110;
+    }
+
+    if (expectedMorphPartOfSpeech === 'article' && !/possessivpronomen|artikel|geschlechtswort/i.test(gloss) && !['article', 'pronoun'].includes(inferredPartOfSpeech)) {
+        score -= 70;
+    }
+
+    if (expectedMorphPartOfSpeech === 'adverb' && inferredPartOfSpeech === 'adverb') {
+        score += 80;
+    }
+
+    if (expectedMorphPartOfSpeech === 'adverb' && inferredPartOfSpeech !== 'adverb') {
+        score -= 80;
     }
 
     if (lowerCaseOriginal && inferredPartOfSpeech === 'adjective') {
@@ -388,6 +521,26 @@ const scoreGermanEntry = (entry, normalizedWord, originalToken) => {
         score += 40;
     }
 
+    if (expectedMorphPartOfSpeech === 'verb' && /\bimperativ\b|\bpräsens aktiv des verbs\b|\bform des verbs\b/i.test(gloss)) {
+        score += 140;
+    }
+
+    if (expectedMorphPartOfSpeech === 'verb' && /\bkeine energie habend\b/i.test(gloss)) {
+        score -= 170;
+    }
+
+    if (expectedMorphPartOfSpeech === 'noun' && /\bhaar\b|\bhornfäden\b|\bkörper von menschen und säugetieren\b/i.test(gloss)) {
+        score += 140;
+    }
+
+    if (expectedMorphPartOfSpeech === 'pronoun' && /\bpersonalpronomen\b|\bbezeichnet die eigene person\b|\bakkusativ der zweiten person singular\b|\bersetzt eine zuvor benutzte nominalphrase\b/i.test(gloss)) {
+        score += 160;
+    }
+
+    if (repeatedDirectAddress && /\bgewöhnliche feldsalat\b/i.test(gloss)) {
+        score -= 220;
+    }
+
     if (entry.word && entry.word.toLocaleLowerCase('de-DE') === normalizedWord) {
         score += 10;
     }
@@ -395,10 +548,10 @@ const scoreGermanEntry = (entry, normalizedWord, originalToken) => {
     return score;
 };
 
-const selectGermanEntry = (entries, normalizedWord, originalToken) => (
+const selectGermanEntry = (entries, normalizedWord, originalToken, morphology = null, phrase = '') => (
     (entries || [])
         .filter((candidate) => candidate?.senses?.length)
-        .sort((left, right) => scoreGermanEntry(right, normalizedWord, originalToken) - scoreGermanEntry(left, normalizedWord, originalToken))[0]
+        .sort((left, right) => scoreGermanEntry(right, normalizedWord, originalToken, morphology, phrase) - scoreGermanEntry(left, normalizedWord, originalToken, morphology, phrase))[0]
 );
 
 const refineGermanEntryByPhrase = (entries, selectedEntry, normalizedWord, phrase) => {
@@ -480,21 +633,7 @@ const getSenseAwareGermanTranslations = async (entry, targetLanguage, sourceWord
         sourceWord,
         targetLanguage
     );
-    if (glossaryTranslations.length) {
-        return glossaryTranslations;
-    }
-
-    const gloss = getFirstGloss(entry);
-    if (!gloss) {
-        return [];
-    }
-
-    try {
-        const translatedGloss = normalizeFetchedText(await fetchTranslationText(gloss, 'de', targetLanguage));
-        return filterTranslationCandidates([translatedGloss], sourceWord, targetLanguage);
-    } catch (error) {
-        return [];
-    }
+    return glossaryTranslations;
 };
 
 const getGermanBaseWord = (entry) => entry?.senses
@@ -778,13 +917,29 @@ const fetchTranslationVariants = async (word, sourceLanguage, targetLanguage) =>
     }
 };
 
-const fetchGermanExactEntry = async (word, originalToken = word) => {
+const fetchStanzaAnalysis = async (text, sourceLanguage) => {
+    if (!stanzaBaseUrl || sourceLanguage !== 'de') {
+        return [];
+    }
+
+    try {
+        const payload = await postJson(`${stanzaBaseUrl}/analyze`, {
+            text,
+            lang: sourceLanguage
+        });
+        return Array.isArray(payload?.tokens) ? payload.tokens : [];
+    } catch (error) {
+        return [];
+    }
+};
+
+const fetchGermanExactEntry = async (word, originalToken = word, morphology = null, phrase = '') => {
     const payload = await fetchJson(`${wiktApiBaseUrl}/v1/de/word/${encodeURIComponent(word)}?lang=de`);
-    const entry = selectGermanEntry(payload?.entries || [], word.toLocaleLowerCase('de-DE'), originalToken);
+    const entry = selectGermanEntry(payload?.entries || [], word.toLocaleLowerCase('de-DE'), originalToken, morphology, phrase);
     return entry ? { payload, entry, resolvedWord: word } : null;
 };
 
-const fetchGermanSearchEntry = async (word, originalToken = word) => {
+const fetchGermanSearchEntry = async (word, originalToken = word, morphology = null, phrase = '') => {
     const payload = await fetchJson(`${wiktApiBaseUrl}/v1/de/search?q=${encodeURIComponent(word)}&lang=de`);
     const results = Array.isArray(payload) ? payload : payload?.results || payload?.entries || [];
     const normalizedQuery = word.toLocaleLowerCase('de-DE');
@@ -803,7 +958,7 @@ const fetchGermanSearchEntry = async (word, originalToken = word) => {
     }
 
     try {
-        const exactMatch = await fetchGermanExactEntry(bestMatch.word, originalToken);
+        const exactMatch = await fetchGermanExactEntry(bestMatch.word, originalToken, morphology, phrase);
         return exactMatch ? { ...exactMatch, bestMatch } : { payload, entry: null, resolvedWord: bestMatch.word, bestMatch };
     } catch (error) {
         if (!isHttpStatusError(error, 404)) {
@@ -860,9 +1015,40 @@ const fetchGermanSeparableStemEntry = async (word) => {
     return null;
 };
 
-const fetchGermanWordEntry = async (word, targetLanguage, phrase, originalToken = word) => {
+const shouldTreatAsDirectAddressName = (phrase, originalToken, entry, morphology) => {
+    if (!isRepeatedDirectAddressToken(phrase, originalToken)) {
+        return false;
+    }
+
+    if (mapStanzaUposToPartOfSpeech(morphology?.upos) === 'proper noun') {
+        return false;
+    }
+
+    const gloss = getFirstGloss(entry) || '';
+    return /\bgewöhnliche feldsalat\b|\bessbar\b|\bpflanze\b|\bkräuterpflanze\b/i.test(gloss);
+};
+
+const shouldRejectMorphologyMismatchedEntry = (entry, originalToken, morphology) => {
+    const expectedMorphPartOfSpeech = mapStanzaUposToPartOfSpeech(morphology?.upos);
+    const inferredPartOfSpeech = inferGermanEntryPartOfSpeech(entry, (originalToken || '').toLocaleLowerCase('de-DE'));
+
+    if (expectedMorphPartOfSpeech === 'noun' && /^[A-ZÄÖÜ]/.test(originalToken || '') && inferredPartOfSpeech === 'verb') {
+        return true;
+    }
+
+    return false;
+};
+
+const fetchGermanWordEntry = async (word, targetLanguage, phrase, originalToken = word, morphology = null) => {
     const normalizedWord = word.toLowerCase();
-    const lookupCandidates = getGermanLookupCandidates(normalizedWord, originalToken);
+    const lookupCandidates = getGermanLookupCandidates(
+        normalizedWord,
+        originalToken,
+    ).concat(
+        morphology?.lemma && typeof morphology.lemma === 'string'
+            ? getGermanLookupCandidates(morphology.lemma.toLocaleLowerCase('de-DE'), morphology.lemma)
+            : []
+    ).filter((candidate, index, list) => list.indexOf(candidate) === index);
     const mayBeProperName = originalToken !== normalizedWord && /^[A-ZÄÖÜ]/.test(originalToken);
 
     let resolvedLookupWord = normalizedWord;
@@ -873,7 +1059,7 @@ const fetchGermanWordEntry = async (word, targetLanguage, phrase, originalToken 
     let lastLookupError = null;
     for (const candidate of lookupCandidates) {
         try {
-            const exactMatch = await fetchGermanExactEntry(candidate, originalToken);
+            const exactMatch = await fetchGermanExactEntry(candidate, originalToken, morphology, phrase);
             if (exactMatch) {
                 resolvedLookupWord = exactMatch.resolvedWord;
                 sourcePayload = exactMatch.payload;
@@ -907,7 +1093,7 @@ const fetchGermanWordEntry = async (word, targetLanguage, phrase, originalToken 
     if (!sourceEntry) {
         for (const candidate of lookupCandidates) {
             try {
-                const searchMatch = await fetchGermanSearchEntry(candidate, originalToken);
+                const searchMatch = await fetchGermanSearchEntry(candidate, originalToken, morphology, phrase);
                 if (searchMatch) {
                     resolvedLookupWord = searchMatch.resolvedWord;
                     sourcePayload = searchMatch.payload;
@@ -930,7 +1116,7 @@ const fetchGermanWordEntry = async (word, targetLanguage, phrase, originalToken 
     let entry = sourceEntry || (sourcePayload?.entries || []).find((candidate) => candidate?.senses?.length);
     if (preferredLookupWord.toLowerCase() !== resolvedLookupWord) {
         try {
-            const baseMatch = await fetchGermanExactEntry(preferredLookupWord, originalToken);
+            const baseMatch = await fetchGermanExactEntry(preferredLookupWord, originalToken, morphology, phrase);
             entry = baseMatch?.entry || entry;
         } catch (error) {
             // Keep the source entry as fallback when combined lemma lookup fails.
@@ -939,11 +1125,26 @@ const fetchGermanWordEntry = async (word, targetLanguage, phrase, originalToken 
 
     entry = refineGermanEntryByPhrase(sourcePayload?.entries || [], entry, normalizedWord, phrase);
 
-    const translationVariants = filterTranslationCandidates(
-        await fetchTranslationVariants(preferredLookupWord, 'de', targetLanguage),
-        preferredLookupWord,
-        targetLanguage
-    );
+    if (entry && shouldTreatAsDirectAddressName(phrase, originalToken, entry, morphology)) {
+        const fallbackEntry = buildFallbackWordEntry(normalizedWord, {
+            lemma: originalToken
+        });
+        fallbackEntry.partOfSpeech = 'not found';
+        fallbackEntry.contextualMeaning = 'Word not found.';
+        fallbackEntry.grammarTags = uniqueValues(getGermanMorphologyTags(morphology));
+        return fallbackEntry;
+    }
+
+    if (entry && shouldRejectMorphologyMismatchedEntry(entry, originalToken, morphology)) {
+        const fallbackEntry = buildFallbackWordEntry(normalizedWord, {
+            lemma: originalToken
+        });
+        fallbackEntry.partOfSpeech = 'not found';
+        fallbackEntry.contextualMeaning = 'Word not found.';
+        fallbackEntry.grammarTags = uniqueValues(getGermanMorphologyTags(morphology));
+        return fallbackEntry;
+    }
+
     if (!entry) {
         if (lastLookupError) {
             const lookupErrorEntry = buildLookupFailedWordEntry(normalizedWord, {
@@ -959,7 +1160,7 @@ const fetchGermanWordEntry = async (word, targetLanguage, phrase, originalToken 
         }
 
         const fallbackEntry = buildFallbackWordEntry(normalizedWord, {
-            lemma: mayBeProperName ? originalToken : normalizedWord
+            lemma: morphology?.lemma || (mayBeProperName ? originalToken : normalizedWord)
         });
         if (separableVerb) {
             fallbackEntry.lemma = separableVerb.combinedLemma;
@@ -967,27 +1168,31 @@ const fetchGermanWordEntry = async (word, targetLanguage, phrase, originalToken 
         } else if (resolvedLookupWord !== normalizedWord) {
             fallbackEntry.lemma = resolvedLookupWord;
         }
+        if (morphology?.upos) {
+            fallbackEntry.grammarTags = uniqueValues([
+                ...(fallbackEntry.grammarTags || []),
+                ...getGermanMorphologyTags(morphology)
+            ]);
+        }
         return fallbackEntry;
     }
 
     const glossaryTranslations = await getSenseAwareGermanTranslations(entry, targetLanguage, preferredLookupWord);
 
-    const partOfSpeech = inferGermanEntryPartOfSpeech(entry, normalizedWord);
+    const partOfSpeech = mapStanzaUposToPartOfSpeech(morphology?.upos) || inferGermanEntryPartOfSpeech(entry, normalizedWord);
     const lemma = partOfSpeech === 'noun'
         ? getGermanLemma(entry, preferredLookupWord)
-        : (entry?.word || preferredLookupWord);
+        : (entry?.word || morphology?.lemma || preferredLookupWord);
 
     return {
         lemma,
         partOfSpeech,
         contextualMeaning: getFirstGloss(entry) || `Kontextbedeutung: ${titleCase(preferredLookupWord)}`,
-        translations: uniqueValues([
-            ...glossaryTranslations,
-            ...(glossaryTranslations.length ? [] : translationVariants)
-        ]).slice(0, 5),
+        translations: glossaryTranslations.slice(0, 5),
         grammarTags: uniqueValues([
             separableVerb ? `Trennbar: ${separableVerb.prefix}-` : undefined,
-            ...getGermanGrammarTags(entry, sourceEntry)
+            ...getGermanGrammarTags(entry, sourceEntry),
+            ...getGermanMorphologyTags(morphology)
         ])
     };
 };
@@ -996,6 +1201,8 @@ const buildInspectorByWord = async (tokens, phrase, sourceLanguage, targetLangua
     const inspectorByWord = {};
     const uniqueKeys = [];
     const originalTokensByKey = {};
+    const morphologyTokens = await fetchStanzaAnalysis(phrase, sourceLanguage);
+    const morphologyByKey = {};
 
     for (const token of tokens) {
         const key = token.toLowerCase();
@@ -1004,6 +1211,13 @@ const buildInspectorByWord = async (tokens, phrase, sourceLanguage, targetLangua
         }
         if (!originalTokensByKey[key]) {
             originalTokensByKey[key] = token;
+        }
+    }
+
+    for (const token of morphologyTokens) {
+        const normalized = toTrimmedString(token?.text).toLocaleLowerCase('de-DE');
+        if (normalized && !morphologyByKey[normalized]) {
+            morphologyByKey[normalized] = token;
         }
     }
 
@@ -1016,7 +1230,13 @@ const buildInspectorByWord = async (tokens, phrase, sourceLanguage, targetLangua
 
             try {
                 if (sourceLanguage === 'de') {
-                    inspectorByWord[key] = await fetchGermanWordEntry(key, targetLanguage, phrase, originalTokensByKey[key]);
+                    inspectorByWord[key] = await fetchGermanWordEntry(
+                        key,
+                        targetLanguage,
+                        phrase,
+                        originalTokensByKey[key],
+                        morphologyByKey[key] || null
+                    );
                 } else {
                     inspectorByWord[key] = buildFallbackWordEntry(key);
                 }

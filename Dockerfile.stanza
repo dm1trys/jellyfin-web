@@ -1,0 +1,28 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY services/stanza-morph/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch
+RUN pip install --no-cache-dir -r requirements.txt
+
+ENV STANZA_MODEL_DIR=/opt/stanza \
+    STANZA_LANGUAGE=de \
+    STANZA_PORT=5000
+
+RUN python - <<'PY'
+import os
+import stanza
+
+stanza.download(
+    lang=os.environ["STANZA_LANGUAGE"],
+    model_dir=os.environ["STANZA_MODEL_DIR"],
+    processors="tokenize,pos,lemma",
+)
+PY
+
+COPY services/stanza-morph/app.py ./app.py
+
+EXPOSE 5000
+
+CMD ["python", "app.py"]

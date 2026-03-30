@@ -37,6 +37,19 @@ services:
     profiles:
       - tools
 
+  stanza-morph:
+    build:
+      context: .
+      dockerfile: Dockerfile.stanza
+    container_name: stanza-morph
+    environment:
+      STANZA_LANGUAGE: de
+      STANZA_MODEL_DIR: /opt/stanza
+      STANZA_PORT: 5000
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
   jellyfin-web:
     build:
       context: .
@@ -45,12 +58,14 @@ services:
     depends_on:
       - jellyfin
       - wiktapi
+      - stanza-morph
     environment:
       BIND_HOST: 0.0.0.0
       WEB_CLIENT_PORT: 8097
       DEEPL_API_KEY: ${DEEPL_API_KEY:-}
       DEEPL_API_URL: ${DEEPL_API_URL:-https://api-free.deepl.com/v2/translate}
       WIKTAPI_BASE_URL: ${WIKTAPI_BASE_URL:-http://wiktapi:3000}
+      STANZA_BASE_URL: ${STANZA_BASE_URL:-http://stanza-morph:5000}
     ports:
       - "8097:8097"
     restart: unless-stopped
