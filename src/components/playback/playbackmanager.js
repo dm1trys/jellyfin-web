@@ -156,12 +156,19 @@ function getItemsForPlayback(serverId, query) {
 }
 
 function createStreamInfoFromUrlItem(item) {
+    const sourceUrl = item.Url || item.Path || item.MediaSources?.[0]?.Path || '';
+    const inferredContainer = ((item.MediaSources?.[0]?.Container || '').toLowerCase()
+        || (sourceUrl.toLowerCase().includes('.m3u8') ? 'hls' : ''));
     const customTextTracks = Array.isArray(item.TextTracks) ? item.TextTracks : [];
     const defaultSubtitleStream = customTextTracks.find((track) => track.IsDefault);
     const baseMediaSource = item.MediaSources?.[0] || {
         Id: item.Id || 'local-url-source',
-        Path: item.Url || item.Path,
+        Path: sourceUrl,
+        Container: inferredContainer,
+        Protocol: 'Http',
         SupportsDirectPlay: true,
+        SupportsDirectStream: false,
+        RequiredHttpHeaders: [],
         MediaStreams: [
             {
                 Index: 0,
@@ -182,6 +189,10 @@ function createStreamInfoFromUrlItem(item) {
     const customTrackByIndex = new Map(customTextTracks.map((track, index) => [track.Index ?? index, track]));
     const mediaSource = {
         ...baseMediaSource,
+        Path: baseMediaSource.Path || sourceUrl,
+        Container: baseMediaSource.Container || inferredContainer,
+        Protocol: baseMediaSource.Protocol || 'Http',
+        RequiredHttpHeaders: Array.isArray(baseMediaSource.RequiredHttpHeaders) ? baseMediaSource.RequiredHttpHeaders : [],
         MediaStreams: Array.isArray(baseMediaSource.MediaStreams) ? baseMediaSource.MediaStreams.map((stream) => {
             if (stream.Type !== 'Subtitle') {
                 return stream;

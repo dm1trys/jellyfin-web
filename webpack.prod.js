@@ -7,5 +7,8 @@ module.exports = merge(common, {
     entry: {
         ...common.entry,
         'serviceworker': './serviceworker.js'
+    },
+    optimization: {
+        minimize: process.env.WEBPACK_MINIMIZE !== '0'
     }
 });

@@ -35,6 +35,8 @@ export function loadLibraryTiles(
             allowBottomPadding: !enableOverflow
         });
 
+        html += '<a is="emby-linkbutton" href="#/ardhome" class="raised homeLibraryButton homeLibraryButton-ard homeLibraryButton-inline"><span class="material-icons homeLibraryIcon ondemand_video" aria-hidden="true"></span><span class="homeLibraryText">ARD Mediathek</span></a>';
+
         if (enableOverflow) {
             html += '</div>';
         }

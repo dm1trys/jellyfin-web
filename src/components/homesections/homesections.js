@@ -7,6 +7,7 @@ import { toApi } from 'utils/jellyfin-apiclient/compat';
 import { queryClient } from 'utils/query/queryClient';
 
 import { loadRecordings } from './sections/activeRecordings';
+import { loadArdMediathek } from './sections/ardMediathek';
 import { loadLibraryButtons } from './sections/libraryButtons';
 import { loadLibraryTiles } from './sections/libraryTiles';
 import { loadLiveTV } from './sections/liveTv';
@@ -123,7 +124,9 @@ export function destroySections(elem) {
 export function pause(elem) {
     const elems = elem.querySelectorAll('.itemsContainer');
     for (const e of elems) {
-        e.pause();
+        if (typeof e.pause === 'function') {
+            e.pause();
+        }
     }
 }
 
@@ -146,6 +149,9 @@ function loadSection(page, apiClient, user, userSettings, userViews, allSections
     const options = { enableOverflow: enableScrollX() };
 
     switch (section) {
+        case HomeSectionType.ArdMediathek:
+            loadArdMediathek(elem, options);
+            break;
         case HomeSectionType.ActiveRecordings:
             loadRecordings(elem, true, apiClient, options);
             break;
@@ -187,4 +193,3 @@ export default {
     pause,
     resume
 };
-

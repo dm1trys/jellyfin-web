@@ -69,7 +69,11 @@ export const playArdItem = async (detail: ArdItemDetailResponse, playback: ArdPl
             MediaSources: [{
                 Id: `${itemId}-source`,
                 Path: playback.hls,
+                Container: 'hls',
+                Protocol: 'Http',
                 SupportsDirectPlay: true,
+                SupportsDirectStream: false,
+                RequiredHttpHeaders: [],
                 MediaStreams: [
                     {
                         Index: 0,

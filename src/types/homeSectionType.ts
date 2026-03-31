@@ -2,6 +2,7 @@
 // https://github.com/jellyfin/jellyfin/blob/1b4394199a2f9883cd601bdb8c9d66015397aa52/Jellyfin.Data/Enums/HomeSectionType.cs
 export enum HomeSectionType {
     None = 'none',
+    ArdMediathek = 'ardmediathek',
     SmallLibraryTiles = 'smalllibrarytiles',
     LibraryButtons = 'librarybuttons',
     ActiveRecordings = 'activerecordings',

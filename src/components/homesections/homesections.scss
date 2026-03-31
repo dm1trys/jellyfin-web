@@ -20,3 +20,15 @@
     text-overflow: ellipsis;
     overflow: hidden;
 }
+
+.homeLibraryButton-ard {
+    background: linear-gradient(135deg, rgba(14, 24, 49, 0.95), rgba(19, 62, 98, 0.9)) !important;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.homeLibraryButton-inline {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 7.5em;
+}

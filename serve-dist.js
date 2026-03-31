@@ -10,6 +10,7 @@ const lookupTimeoutMs = 8000;
 const wiktApiBaseUrl = (process.env.WIKTAPI_BASE_URL || 'https://api.wiktapi.dev').replace(/\/+$/, '');
 const stanzaBaseUrl = (process.env.STANZA_BASE_URL || '').replace(/\/+$/, '');
 const ardProxyBaseUrl = (process.env.ARD_PROXY_BASE_URL || 'http://127.0.0.1:5100').replace(/\/+$/, '');
+const jellyfinBackendBaseUrl = (process.env.JELLYFIN_BACKEND_URL || 'http://127.0.0.1:8096').replace(/\/+$/, '');
 
 const contentTypes = {
     '.css': 'text/css; charset=utf-8',
@@ -1368,6 +1369,74 @@ const proxyArdRequest = async (request, response) => {
     response.end(Buffer.from(body));
 };
 
+const getRequestOrigin = (request) => {
+    const forwardedProto = toTrimmedString(request.headers['x-forwarded-proto']);
+    const protocol = forwardedProto || 'http';
+    const forwardedHost = toTrimmedString(request.headers['x-forwarded-host']);
+    const host = forwardedHost || toTrimmedString(request.headers.host);
+
+    if (!host) {
+        return null;
+    }
+
+    return `${protocol}://${host}`;
+};
+
+const proxySystemInfoPublic = async (request, response) => {
+    const upstreamUrl = new URL('/System/Info/Public', jellyfinBackendBaseUrl);
+    const payload = await fetchJson(upstreamUrl);
+    const origin = getRequestOrigin(request);
+
+    if (origin && payload && typeof payload === 'object') {
+        payload.LocalAddress = origin;
+        if (Array.isArray(payload.LocalAddresses)) {
+            payload.LocalAddresses = [origin];
+        }
+        if (payload.WanAddress) {
+            payload.WanAddress = origin;
+        }
+    }
+
+    const body = Buffer.from(JSON.stringify(payload));
+    response.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Content-Length': body.length
+    });
+    response.end(body);
+};
+
+const proxyWebConfig = (request, response) => {
+    const configPath = path.join(distDir, 'config.json');
+    const origin = getRequestOrigin(request);
+
+    fs.readFile(configPath, 'utf8', (error, rawConfig) => {
+        if (error) {
+            response.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            response.end(JSON.stringify({ error: 'Failed to read config.json' }));
+            return;
+        }
+
+        try {
+            const payload = JSON.parse(rawConfig);
+            if (origin) {
+                payload.servers = [origin];
+            }
+
+            const body = Buffer.from(JSON.stringify(payload, null, 2));
+            response.writeHead(200, {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Cache-Control': 'no-store',
+                'Content-Length': body.length
+            });
+            response.end(body);
+        } catch (parseError) {
+            response.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            response.end(JSON.stringify({ error: 'Failed to parse config.json' }));
+        }
+    });
+};
+
 const sendFile = (response, filePath) => {
     fs.readFile(filePath, (error, data) => {
         if (error) {
@@ -1398,6 +1467,23 @@ const getPauseTranslateRequestParams = (body) => {
 };
 
 http.createServer(async (request, response) => {
+    if (request.method === 'GET' && request.url === '/System/Info/Public') {
+        try {
+            await proxySystemInfoPublic(request, response);
+        } catch (error) {
+            response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+            response.end(JSON.stringify({
+                error: error instanceof Error ? error.message : 'System info proxy request failed'
+            }));
+        }
+        return;
+    }
+
+    if (request.method === 'GET' && (request.url === '/config.json' || request.url === '/web/config.json')) {
+        proxyWebConfig(request, response);
+        return;
+    }
+
     if ((request.url || '').startsWith('/api/ard/')) {
         if ((request.url || '').startsWith('/api/ard/subtitles') && request.method === 'GET') {
             try {
