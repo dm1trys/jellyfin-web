@@ -9,6 +9,7 @@ const bindHost = process.env.BIND_HOST || '0.0.0.0';
 const lookupTimeoutMs = 8000;
 const wiktApiBaseUrl = (process.env.WIKTAPI_BASE_URL || 'https://api.wiktapi.dev').replace(/\/+$/, '');
 const stanzaBaseUrl = (process.env.STANZA_BASE_URL || '').replace(/\/+$/, '');
+const ardProxyBaseUrl = (process.env.ARD_PROXY_BASE_URL || 'http://127.0.0.1:5100').replace(/\/+$/, '');
 
 const contentTypes = {
     '.css': 'text/css; charset=utf-8',
@@ -62,6 +63,70 @@ const normalizeSubtitleText = (text) => text
 const tokenizeWords = (text) => (
     text.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) || []
 );
+
+const parseVttTimestampToTicks = (value) => {
+    const normalized = toTrimmedString(value).replace(',', '.');
+    const match = normalized.match(/^(?:(\d+):)?(\d{2}):(\d{2})\.(\d{3})$/);
+    if (!match) {
+        return null;
+    }
+
+    const hours = Number(match[1] || 0);
+    const minutes = Number(match[2] || 0);
+    const seconds = Number(match[3] || 0);
+    const milliseconds = Number(match[4] || 0);
+    const totalMilliseconds = (((hours * 60) + minutes) * 60 + seconds) * 1000 + milliseconds;
+
+    return totalMilliseconds * 10000;
+};
+
+const parseVttToTrackEvents = (text) => {
+    const blocks = toTrimmedString(text)
+        .replace(/\r/g, '')
+        .split(/\n{2,}/)
+        .map((block) => block.trim())
+        .filter(Boolean);
+
+    const trackEvents = [];
+
+    for (const block of blocks) {
+        const lines = block.split('\n').map((line) => line.trimEnd());
+        if (!lines.length || /^WEBVTT\b/i.test(lines[0])) {
+            continue;
+        }
+
+        let cueLineIndex = 0;
+        if (!lines[0].includes('-->') && lines[1]?.includes('-->')) {
+            cueLineIndex = 1;
+        }
+
+        const timingLine = lines[cueLineIndex];
+        if (!timingLine || !timingLine.includes('-->')) {
+            continue;
+        }
+
+        const [rawStart, rawEndWithSettings] = timingLine.split('-->').map((part) => part.trim());
+        const rawEnd = rawEndWithSettings.split(/\s+/)[0];
+        const startTicks = parseVttTimestampToTicks(rawStart);
+        const endTicks = parseVttTimestampToTicks(rawEnd);
+        if (startTicks == null || endTicks == null) {
+            continue;
+        }
+
+        const cueText = normalizeSubtitleText(lines.slice(cueLineIndex + 1).join('\n'));
+        if (!cueText) {
+            continue;
+        }
+
+        trackEvents.push({
+            StartPositionTicks: startTicks,
+            EndPositionTicks: endTicks,
+            Text: cueText
+        });
+    }
+
+    return { TrackEvents: trackEvents };
+};
 
 const maybeRepairMojibake = (value) => {
     if (typeof value !== 'string') {
@@ -834,6 +899,17 @@ const postJson = (urlString, body, headers = {}) => new Promise((resolve, reject
     request.end();
 });
 
+const isAllowedArdSubtitleUrl = (value) => {
+    try {
+        const parsed = new URL(value);
+        return parsed.protocol === 'https:'
+            && parsed.hostname === 'api.ardmediathek.de'
+            && /\/player-service\/subtitle\/webvtt\//.test(parsed.pathname);
+    } catch (error) {
+        return false;
+    }
+};
+
 const toDeepLLanguageCode = (language) => {
     const normalized = toTrimmedString(language).replace('-', '_').toUpperCase();
     if (!normalized) {
@@ -1275,6 +1351,23 @@ const sendJson = (response, statusCode, payload) => {
     response.end(JSON.stringify(payload));
 };
 
+const proxyArdRequest = async (request, response) => {
+    const upstreamUrl = new URL((request.url || '').replace(/^\/api\/ard/, '/api/ard'), ardProxyBaseUrl);
+    const upstreamResponse = await fetch(upstreamUrl, {
+        method: request.method || 'GET',
+        headers: {
+            accept: request.headers.accept || 'application/json'
+        }
+    });
+
+    const body = await upstreamResponse.arrayBuffer();
+    response.writeHead(upstreamResponse.status, {
+        'Content-Type': upstreamResponse.headers.get('content-type') || 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store'
+    });
+    response.end(Buffer.from(body));
+};
+
 const sendFile = (response, filePath) => {
     fs.readFile(filePath, (error, data) => {
         if (error) {
@@ -1305,6 +1398,47 @@ const getPauseTranslateRequestParams = (body) => {
 };
 
 http.createServer(async (request, response) => {
+    if ((request.url || '').startsWith('/api/ard/')) {
+        if ((request.url || '').startsWith('/api/ard/subtitles') && request.method === 'GET') {
+            try {
+                const requestUrl = new URL(request.url, `http://${request.headers.host || '127.0.0.1'}`);
+                const subtitleUrl = toTrimmedString(requestUrl.searchParams.get('url'));
+                if (!isAllowedArdSubtitleUrl(subtitleUrl)) {
+                    sendJson(response, 400, { error: 'Invalid subtitle url' });
+                    return;
+                }
+
+                const upstream = await fetch(subtitleUrl, {
+                    headers: {
+                        'User-Agent': 'jellyfin-ard-proxy'
+                    }
+                });
+
+                if (!upstream.ok) {
+                    sendJson(response, 502, { error: `Subtitle request failed with ${upstream.status}` });
+                    return;
+                }
+
+                const body = await upstream.text();
+                sendJson(response, 200, parseVttToTrackEvents(body));
+            } catch (error) {
+                sendJson(response, 502, {
+                    error: error instanceof Error ? error.message : 'Subtitle proxy request failed'
+                });
+            }
+            return;
+        }
+
+        try {
+            await proxyArdRequest(request, response);
+        } catch (error) {
+            sendJson(response, 502, {
+                error: error instanceof Error ? error.message : 'ARD proxy request failed'
+            });
+        }
+        return;
+    }
+
     if (request.method === 'POST' && request.url === '/api/pause-translate/translate') {
         try {
             const body = await readJsonBody(request);

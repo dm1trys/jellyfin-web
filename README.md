@@ -284,6 +284,9 @@ DEEPL_API_URL=https://api-free.deepl.com/v2/translate
 WIKTAPI_BASE_URL=http://wiktapi:3000
 WIKTAPI_DATA_DIR=./wiktapi-data
 STANZA_BASE_URL=http://stanza-morph:5000
+ARD_PROXY_BASE_URL=http://ard-proxy:5100
+ARD_API_BASE_URL=https://api.ardmediathek.de
+ARD_USER_ID=personalized
 ```
 
 `.env` is ignored by git and will be picked up automatically by `docker compose`.
@@ -313,6 +316,7 @@ This starts:
 - custom web client on `http://127.0.0.1:8097`
 - self-hosted WiktApi on `http://127.0.0.1:3000`
 - Stanza morphology service on `http://127.0.0.1:5000`
+- ARD proxy service on `http://127.0.0.1:5100`
 
 Stop everything:
 
@@ -327,6 +331,7 @@ docker compose logs -f jellyfin
 docker compose logs -f jellyfin-web
 docker compose logs -f wiktapi
 docker compose logs -f stanza-morph
+docker compose logs -f ard-proxy
 ```
 
 Notes:
@@ -336,6 +341,7 @@ Notes:
 - phrase translation uses DeepL when `DEEPL_API_KEY` is set and falls back to MyMemory otherwise
 - word inspector uses the self-hosted WiktApi service from the compose network when `WIKTAPI_BASE_URL` points to `http://wiktapi:3000`
 - German morphology is enriched with a self-hosted Stanza service when `STANZA_BASE_URL` points to `http://stanza-morph:5000`
+- ARD discovery data can be normalized through the self-hosted ARD proxy when `ARD_PROXY_BASE_URL` points to `http://ard-proxy:5100`
 - if you rebuild the web client, run `docker compose up --build -d` again
 
 Optional tooling container for WiktApi data management:
@@ -346,3 +352,25 @@ docker compose --profile tools run --rm wiktapi-worker node scripts/import_data.
 ```
 
 That worker writes into the same `WIKTAPI_DATA_DIR`, so the runtime container can immediately use the generated `wiktionary.db`.
+
+### ARD Proxy Scaffold
+
+The compose stack includes an `ard-proxy` service that normalizes the current `ardmediathek.de` JSON endpoints for an ARD-style home, search, details, and playback flow.
+
+Host health check:
+
+```sh
+curl http://127.0.0.1:5100/health
+```
+
+Available scaffold endpoints:
+
+```text
+GET /api/ard/home
+GET /api/ard/search?q=Tatort&page=0
+GET /api/ard/item/:id
+GET /api/ard/recommendations/:id
+GET /api/ard/play/:id
+```
+
+Shared frontend payload types live in [`src/apps/stable/features/ard/types.ts`](/home/dmitrys/work/jellyfin-web/src/apps/stable/features/ard/types.ts).

@@ -16,9 +16,14 @@ This repository is a custom `jellyfin-web` fork with additional runtime services
 
 ## Working Rules
 
-- Do not run `make build` unless the user explicitly asks for it.
-- Do not rebuild Docker images or restart the stack unless the user explicitly asks for it.
-- Prefer runtime verification against the already-running stack before asking for a rebuild.
+- The agent may run `make build` when a frontend rebuild is needed to validate or ship a change.
+- The agent may rebuild Docker images or restart the stack when a runtime update is needed to validate or ship a change.
+- Prefer targeted rebuilds over full stack restarts.
+- Use `make build WEBPACK_PARALLELISM=1` on this machine unless there is a reason to increase parallelism.
+- Use `make docker-web` for web-only changes.
+- Use `make docker-ard` for `ard-proxy`-only changes.
+- Use `make docker-web-ard` when both the web client and `ard-proxy` changed.
+- Prefer runtime verification against the already-running stack before rebuilding, but do not block on asking for permission first.
 - Use `apply_patch` for manual file edits.
 - Prefer `rg` for search.
 
@@ -57,6 +62,7 @@ This repository is a custom `jellyfin-web` fork with additional runtime services
 
 - Preferred browser validation tool: Playwright in headed mode.
 - When testing UI/runtime behavior, verify against the live app on `http://127.0.0.1:8097` unless the user specifies otherwise.
+- Before each Playwright runtime verification, do an explicit page reload and re-check the loaded `main.jellyfin.bundle.js?...` URL/hash.
 - Check the loaded frontend commit in browser console before assuming new UI code is deployed.
 - If the UI looks stale, verify whether the issue is:
   - old `dist`

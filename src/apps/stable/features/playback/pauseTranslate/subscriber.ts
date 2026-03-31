@@ -8,9 +8,24 @@ import { fetchPauseTranslationInspector, fetchPauseTranslationPreview } from './
 import { normalizeSubtitleText, tokenizeWords } from './text';
 import type { PauseTranslateInspector, PauseTranslatePreview } from './types';
 
-const getSourceLanguage = () => {
-    const language = currentSettings.pauseTranslateSourceLanguage();
-    return typeof language === 'string' && language ? language : 'en';
+const LANGUAGE_ALIASES: Record<string, string> = {
+    deu: 'de',
+    ger: 'de',
+    eng: 'en',
+    ukr: 'uk'
+};
+
+const normalizeLanguageCode = (language?: string | null) => {
+    if (!language || typeof language !== 'string') {
+        return '';
+    }
+
+    const normalized = language.trim().toLowerCase();
+    if (!normalized || normalized === 'und') {
+        return '';
+    }
+
+    return LANGUAGE_ALIASES[normalized] || normalized.slice(0, 2);
 };
 
 const getTargetLanguage = () => {
@@ -60,6 +75,28 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
         return normalizeSubtitleText(subtitleText);
     }
 
+    private getDetectedSourceLanguage() {
+        if (!this.player) {
+            return '';
+        }
+
+        const explicitLanguage = currentSettings.get('pauseTranslateSourceLanguage', false);
+        if (typeof explicitLanguage === 'string' && explicitLanguage.trim()) {
+            return normalizeLanguageCode(explicitLanguage) || explicitLanguage;
+        }
+
+        const mediaSource = this.playbackManager.currentMediaSource(this.player);
+        const subtitleIndex = this.playbackManager.getSubtitleStreamIndex(this.player);
+        const subtitleStreams = mediaSource?.MediaStreams?.filter((stream) => stream.Type === 'Subtitle') || [];
+
+        const selectedStream = subtitleStreams.find((stream) => stream.Index === subtitleIndex)
+            || subtitleStreams.find((stream) => stream.Index === mediaSource?.DefaultSubtitleStreamIndex)
+            || subtitleStreams[0];
+
+        const detected = normalizeLanguageCode(selectedStream?.Language);
+        return detected || 'en';
+    }
+
     private async renderPauseOverlay(force = false) {
         const subtitleText = this.getVisibleSubtitleText(this.player) || this.lastVisibleSubtitleText;
         if (!subtitleText) {
@@ -71,7 +108,7 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
             return;
         }
 
-        const sourceLanguage = getSourceLanguage();
+        const sourceLanguage = this.getDetectedSourceLanguage();
         const targetLanguage = getTargetLanguage();
         const cacheKey = `${sourceLanguage}|${targetLanguage}|${subtitleText}`;
         this.lastRenderedSubtitleText = subtitleText;

@@ -1,0 +1,13 @@
+FROM node:24-alpine
+
+WORKDIR /app
+
+COPY services/ard-proxy/server.js ./server.js
+
+ENV ARD_PROXY_HOST=0.0.0.0
+ENV ARD_PROXY_PORT=5100
+ENV ARD_API_BASE_URL=https://api.ardmediathek.de
+
+EXPOSE 5100
+
+CMD ["node", "server.js"]
