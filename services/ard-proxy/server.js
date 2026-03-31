@@ -1,6 +1,9 @@
 'use strict';
 
 const http = require('node:http');
+const crypto = require('node:crypto');
+const fs = require('node:fs/promises');
+const path = require('node:path');
 const { URL } = require('node:url');
 
 const HOST = process.env.ARD_PROXY_HOST || '0.0.0.0';
@@ -9,10 +12,33 @@ const ARD_API_BASE_URL = process.env.ARD_API_BASE_URL || 'https://api.ardmediath
 const DEFAULT_USER_ID = process.env.ARD_USER_ID || 'personalized';
 const USER_AGENT = process.env.ARD_PROXY_USER_AGENT || 'jellyfin-ard-proxy/0.1';
 const DEFAULT_IMAGE_WIDTH = Number(process.env.ARD_IMAGE_WIDTH || 640);
+const IMAGE_CACHE_DIR = process.env.ARD_IMAGE_CACHE_DIR || '/cache';
+const IMAGE_CACHE_MAX_AGE_SECONDS = Number(process.env.ARD_IMAGE_CACHE_MAX_AGE_SECONDS || 86400);
+const HOME_CACHE_TTL_SECONDS = Number(process.env.ARD_HOME_CACHE_TTL_SECONDS || 120);
+const PAGE_CACHE_TTL_SECONDS = Number(process.env.ARD_PAGE_CACHE_TTL_SECONDS || 120);
+const MAX_HOME_ROWS = Number(process.env.ARD_MAX_HOME_ROWS || 8);
+const MAX_ROW_ITEMS = Number(process.env.ARD_MAX_ROW_ITEMS || 12);
 const ITEM_BRANDS = (process.env.ARD_ITEM_BRANDS || 'ard,daserste,br,ndr,wdr,mdr,swr,rbb,hr,sr,one,kika,arte,3sat,alpha,tagesschau,phoenix')
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean);
+const responseCache = new Map();
+
+function sha1(value) {
+    return crypto.createHash('sha1').update(value).digest('hex');
+}
+
+function getImageCachePaths(sourceUrl) {
+    const key = sha1(sourceUrl);
+    return {
+        metaPath: path.join(IMAGE_CACHE_DIR, `${key}.json`),
+        bodyPath: path.join(IMAGE_CACHE_DIR, `${key}.bin`)
+    };
+}
+
+async function ensureCacheDir() {
+    await fs.mkdir(IMAGE_CACHE_DIR, { recursive: true });
+}
 
 function sendJson(res, statusCode, body) {
     const payload = JSON.stringify(body);
@@ -104,7 +130,7 @@ function normalizeImage(images) {
             : null;
 
         return {
-            url: normalizedUrl,
+            url: normalizedUrl ? `/api/ard/image?url=${encodeURIComponent(normalizedUrl)}` : null,
             alt: images.alt || images.title || null,
             title: images.title || null,
             aspectRatio: images.aspectRatio || null
@@ -123,11 +149,81 @@ function normalizeImage(images) {
         : null;
 
     return candidate ? {
-        url: normalizedUrl,
+        url: normalizedUrl ? `/api/ard/image?url=${encodeURIComponent(normalizedUrl)}` : null,
         alt: candidate.alt || candidate.title || null,
         title: candidate.title || null,
         aspectRatio: candidate.aspectRatio || null
     } : null;
+}
+
+function isAllowedImageUrl(sourceUrl) {
+    try {
+        const parsed = new URL(sourceUrl);
+        return parsed.protocol === 'https:' && parsed.hostname === 'api.ardmediathek.de';
+    } catch (_error) {
+        return false;
+    }
+}
+
+async function readCachedImage(sourceUrl) {
+    const { metaPath, bodyPath } = getImageCachePaths(sourceUrl);
+
+    try {
+        const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+        const ageSeconds = Math.floor((Date.now() - Number(meta.cachedAt || 0)) / 1000);
+        if (!meta.cachedAt || ageSeconds > IMAGE_CACHE_MAX_AGE_SECONDS) {
+            return null;
+        }
+
+        const body = await fs.readFile(bodyPath);
+        return { meta, body };
+    } catch (_error) {
+        return null;
+    }
+}
+
+async function writeCachedImage(sourceUrl, response, body) {
+    const { metaPath, bodyPath } = getImageCachePaths(sourceUrl);
+    const meta = {
+        cachedAt: Date.now(),
+        contentType: response.headers.get('content-type') || 'application/octet-stream',
+        cacheControl: response.headers.get('cache-control') || null,
+        etag: response.headers.get('etag') || null,
+        sourceUrl
+    };
+
+    await fs.writeFile(bodyPath, body);
+    await fs.writeFile(metaPath, JSON.stringify(meta));
+    return meta;
+}
+
+function sendBinary(res, statusCode, meta, body, cacheHit) {
+    res.writeHead(statusCode, {
+        'content-type': meta.contentType || 'application/octet-stream',
+        'content-length': body.length,
+        'cache-control': `public, max-age=${IMAGE_CACHE_MAX_AGE_SECONDS}`,
+        'x-ard-image-cache': cacheHit ? 'hit' : 'miss'
+    });
+    res.end(body);
+}
+
+async function fetchAndCacheImage(sourceUrl) {
+    const response = await fetch(sourceUrl, {
+        headers: {
+            'accept': 'image/*,*/*;q=0.8',
+            'user-agent': USER_AGENT
+        }
+    });
+
+    if (!response.ok) {
+        const error = new Error(`ARD image request failed: ${response.status} ${response.statusText}`);
+        error.statusCode = response.status;
+        throw error;
+    }
+
+    const body = Buffer.from(await response.arrayBuffer());
+    const meta = await writeCachedImage(sourceUrl, response, body);
+    return { meta, body };
 }
 
 function normalizeBadges(teaser) {
@@ -280,6 +376,38 @@ async function resolveWidgetTeasers(widget) {
     }
 }
 
+function getCachedValue(key, ttlSeconds) {
+    const cached = responseCache.get(key);
+    if (!cached) {
+        return null;
+    }
+
+    const ageSeconds = (Date.now() - cached.cachedAt) / 1000;
+    if (ageSeconds > ttlSeconds) {
+        responseCache.delete(key);
+        return null;
+    }
+
+    return cached.value;
+}
+
+function setCachedValue(key, value) {
+    responseCache.set(key, {
+        cachedAt: Date.now(),
+        value
+    });
+    return value;
+}
+
+async function withCachedValue(key, ttlSeconds, loader) {
+    const cached = getCachedValue(key, ttlSeconds);
+    if (cached) {
+        return cached;
+    }
+
+    return setCachedValue(key, await loader());
+}
+
 function normalizeTeaser(teaser) {
     if (!teaser || typeof teaser !== 'object') {
         return null;
@@ -321,6 +449,7 @@ function normalizeTeaser(teaser) {
 
 async function normalizeRow(widget) {
     const items = (await resolveWidgetTeasers(widget))
+        .slice(0, MAX_ROW_ITEMS)
         .map(normalizeTeaser)
         .filter(Boolean);
 
@@ -339,6 +468,7 @@ async function normalizeHome(data) {
     const rows = (await Promise.all(
         widgets
             .filter((widget) => widget !== heroWidget)
+            .slice(0, MAX_HOME_ROWS)
             .map((widget) => normalizeRow(widget))
     ))
         .filter((row) => row.items.length > 0 || row.type === 'navigation');
@@ -464,11 +594,33 @@ async function handleRequest(req, res) {
         }
 
         if (pathname === '/api/ard/home') {
-            const data = await fetchJson('/page-gateway/pages/ard/home', {
-                userId: url.searchParams.get('userId') || DEFAULT_USER_ID,
-                embedded: 'false'
+            const userId = url.searchParams.get('userId') || DEFAULT_USER_ID;
+            const result = await withCachedValue(`home:${userId}`, HOME_CACHE_TTL_SECONDS, async () => {
+                const data = await fetchJson('/page-gateway/pages/ard/home', {
+                    userId,
+                    embedded: 'false'
+                });
+                return normalizeHome(data);
             });
-            return sendJson(res, 200, await normalizeHome(data));
+            return sendJson(res, 200, result);
+        }
+
+        if (pathname === '/api/ard/image') {
+            const sourceUrl = url.searchParams.get('url') || '';
+            if (!sourceUrl) {
+                return sendJson(res, 400, { error: 'url is required' });
+            }
+            if (!isAllowedImageUrl(sourceUrl)) {
+                return sendJson(res, 400, { error: 'url is not allowed' });
+            }
+
+            const cached = await readCachedImage(sourceUrl);
+            if (cached) {
+                return sendBinary(res, 200, cached.meta, cached.body, true);
+            }
+
+            const fresh = await fetchAndCacheImage(sourceUrl);
+            return sendBinary(res, 200, fresh.meta, fresh.body, false);
         }
 
         if (pathname === '/api/ard/search') {
@@ -516,8 +668,11 @@ async function handleRequest(req, res) {
                 return sendJson(res, 400, { error: 'href is required' });
             }
 
-            const data = await fetchJson(href);
-            return sendJson(res, 200, await normalizeHome(data));
+            const result = await withCachedValue(`page:${href}`, PAGE_CACHE_TTL_SECONDS, async () => {
+                const data = await fetchJson(href);
+                return normalizeHome(data);
+            });
+            return sendJson(res, 200, result);
         }
 
         if (pathname.startsWith('/api/ard/item/')) {
@@ -580,6 +735,13 @@ const server = http.createServer((req, res) => {
     return void handleRequest(req, res);
 });
 
-server.listen(PORT, HOST, () => {
-    console.log(`ard-proxy listening on http://${HOST}:${PORT}`);
-});
+ensureCacheDir()
+    .then(() => {
+        server.listen(PORT, HOST, () => {
+            console.log(`ard-proxy listening on http://${HOST}:${PORT}`);
+        });
+    })
+    .catch((error) => {
+        console.error('Failed to initialize ard-proxy cache directory', error);
+        process.exit(1);
+    });

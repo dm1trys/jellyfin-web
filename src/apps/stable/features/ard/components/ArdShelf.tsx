@@ -36,7 +36,7 @@ const ArdShelf: FC<ArdShelfProps> = ({ title, items }) => {
                     >
                         <div className='ardCard-imageWrap'>
                             {item.image?.url ? (
-                                <img className='ardCard-image' src={item.image.url} alt={item.image.alt || item.title || 'ARD'} />
+                                <img className='ardCard-image' src={item.image.url} alt={item.image.alt || item.title || 'ARD'} loading='lazy' decoding='async' />
                             ) : (
                                 <div className='ardCard-imagePlaceholder' />
                             )}

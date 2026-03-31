@@ -60,6 +60,14 @@ services:
       ARD_PROXY_PORT: 5100
       ARD_API_BASE_URL: ${ARD_API_BASE_URL:-https://api.ardmediathek.de}
       ARD_USER_ID: ${ARD_USER_ID:-personalized}
+      ARD_IMAGE_CACHE_DIR: /cache
+      ARD_IMAGE_CACHE_MAX_AGE_SECONDS: ${ARD_IMAGE_CACHE_MAX_AGE_SECONDS:-86400}
+      ARD_HOME_CACHE_TTL_SECONDS: ${ARD_HOME_CACHE_TTL_SECONDS:-120}
+      ARD_PAGE_CACHE_TTL_SECONDS: ${ARD_PAGE_CACHE_TTL_SECONDS:-120}
+      ARD_MAX_HOME_ROWS: ${ARD_MAX_HOME_ROWS:-8}
+      ARD_MAX_ROW_ITEMS: ${ARD_MAX_ROW_ITEMS:-12}
+    volumes:
+      - ${ARD_IMAGE_CACHE_DIR:-./ard-image-cache}:/cache
     ports:
       - "5100:5100"
     restart: unless-stopped

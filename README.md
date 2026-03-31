@@ -287,7 +287,18 @@ STANZA_BASE_URL=http://stanza-morph:5000
 ARD_PROXY_BASE_URL=http://ard-proxy:5100
 ARD_API_BASE_URL=https://api.ardmediathek.de
 ARD_USER_ID=personalized
+ARD_IMAGE_CACHE_DIR=./ard-image-cache
+ARD_IMAGE_CACHE_MAX_AGE_SECONDS=86400
 ```
+
+`ard-proxy` also stores proxied ARD artwork in a local file cache mounted from `ARD_IMAGE_CACHE_DIR`. This keeps ARD home/detail images on the same origin and avoids repeated remote image fetches from the browser.
+
+Home and grouped ARD pages are also cached in-memory inside `ard-proxy` for a short TTL and trimmed to a smaller number of rows/items via:
+
+- `ARD_HOME_CACHE_TTL_SECONDS`
+- `ARD_PAGE_CACHE_TTL_SECONDS`
+- `ARD_MAX_HOME_ROWS`
+- `ARD_MAX_ROW_ITEMS`
 
 `.env` is ignored by git and will be picked up automatically by `docker compose`.
 

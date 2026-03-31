@@ -26,6 +26,7 @@ config.json
 .runtime-web/
 .runtime-jellyfin/
 wiktapi-data/
+ard-image-cache/
 
 # python
 __pycache__/

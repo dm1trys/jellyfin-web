@@ -51,7 +51,7 @@ export default function ArdHome() {
             {error ? <div className='ardState'>{error}</div> : null}
             {hero ? (
                 <section className='ardHero'>
-                    {hero.image?.url ? <img className='ardHero-image' src={hero.image.url} alt={hero.image.alt || hero.title || 'ARD'} /> : <div className='ardHero-image' />}
+                    {hero.image?.url ? <img className='ardHero-image' src={hero.image.url} alt={hero.image.alt || hero.title || 'ARD'} loading='eager' decoding='async' /> : <div className='ardHero-image' />}
                     <div>
                         <h1 className='ardHero-title'>{hero.title}</h1>
                         {hero.description ? <p className='ardHero-description'>{hero.description}</p> : null}
