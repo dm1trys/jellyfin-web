@@ -163,6 +163,7 @@ export class PauseTranslateOverlay {
 
         this.overlay.append(this.originalNode, this.translatedNode, this.wordsNode, this.inspectorNode);
         this.overlay.addEventListener('click', this.handleClick);
+        document.addEventListener('keydown', this.handleKeydown);
         document.body.appendChild(this.overlay);
     }
 
@@ -171,21 +172,29 @@ export class PauseTranslateOverlay {
             return;
         }
 
-        this.wordsNode.innerHTML = '';
+        const wordsNode = this.wordsNode;
+        wordsNode.innerHTML = '';
 
-        for (const word of tokenizeWords(this.currentOriginal)) {
+        tokenizeWords(this.currentOriginal).forEach((word, index) => {
             const button = document.createElement('button');
             button.type = 'button';
             button.className = WORD_BUTTON_CLASS;
             button.dataset.word = word;
             button.textContent = word;
 
+            if (index < 9) {
+                const shortcut = String(index + 1);
+                button.dataset.shortcut = shortcut;
+                button.title = `Press ${shortcut}`;
+                button.setAttribute('aria-keyshortcuts', shortcut);
+            }
+
             if (word === this.selectedWord) {
                 button.classList.add(WORD_BUTTON_ACTIVE_CLASS);
             }
 
-            this.wordsNode.appendChild(button);
-        }
+            wordsNode.appendChild(button);
+        });
     }
 
     private readonly handleClick = (event: Event) => {
@@ -200,5 +209,45 @@ export class PauseTranslateOverlay {
         }
 
         this.onWordSelect(wordButton.dataset.word);
+    };
+
+    private readonly handleKeydown = (event: KeyboardEvent) => {
+        if (
+            event.defaultPrevented
+            || event.altKey
+            || event.ctrlKey
+            || event.metaKey
+            || !this.overlay
+            || this.overlay.classList.contains('hide')
+        ) {
+            return;
+        }
+
+        const target = event.target;
+        if (
+            target instanceof HTMLInputElement
+            || target instanceof HTMLTextAreaElement
+            || target instanceof HTMLSelectElement
+            || (target instanceof HTMLElement && target.isContentEditable)
+        ) {
+            return;
+        }
+
+        const match = event.key.match(/^(?:[1-9])$/);
+        const shortcut = match?.[0]
+            || event.code.match(/^Digit([1-9])$/)?.[1]
+            || event.code.match(/^Numpad([1-9])$/)?.[1];
+        if (!shortcut) {
+            return;
+        }
+
+        const button = this.wordsNode?.querySelector<HTMLButtonElement>(`.${WORD_BUTTON_CLASS}[data-shortcut="${shortcut}"]`);
+        const word = button?.dataset.word;
+        if (!word) {
+            return;
+        }
+
+        event.preventDefault();
+        this.onWordSelect(word);
     };
 }

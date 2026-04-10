@@ -8,6 +8,12 @@ import { fetchPauseTranslationInspector, fetchPauseTranslationPreview } from './
 import { normalizeSubtitleText, tokenizeWords } from './text';
 import type { PauseTranslateInspector, PauseTranslatePreview } from './types';
 
+type SubtitleStreamLike = {
+    Index?: number
+    Language?: string | null
+    Type?: string
+};
+
 const LANGUAGE_ALIASES: Record<string, string> = {
     deu: 'de',
     ger: 'de',
@@ -87,10 +93,11 @@ class PauseTranslateSubscriber extends PlaybackSubscriber {
 
         const mediaSource = this.playbackManager.currentMediaSource(this.player);
         const subtitleIndex = this.playbackManager.getSubtitleStreamIndex(this.player);
-        const subtitleStreams = mediaSource?.MediaStreams?.filter((stream) => stream.Type === 'Subtitle') || [];
+        const subtitleStreams: SubtitleStreamLike[] = (mediaSource?.MediaStreams || [])
+            .filter((stream: SubtitleStreamLike) => stream.Type === 'Subtitle');
 
-        const selectedStream = subtitleStreams.find((stream) => stream.Index === subtitleIndex)
-            || subtitleStreams.find((stream) => stream.Index === mediaSource?.DefaultSubtitleStreamIndex)
+        const selectedStream = subtitleStreams.find((stream: SubtitleStreamLike) => stream.Index === subtitleIndex)
+            || subtitleStreams.find((stream: SubtitleStreamLike) => stream.Index === mediaSource?.DefaultSubtitleStreamIndex)
             || subtitleStreams[0];
 
         const detected = normalizeLanguageCode(selectedStream?.Language);

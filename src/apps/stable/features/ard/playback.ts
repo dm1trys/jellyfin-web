@@ -18,7 +18,7 @@ const toSubtitleFormat = (subtitle: ArdSubtitleSource) => {
     return format || 'vtt';
 };
 
-const normalizeSubtitleLanguage = (lang?: string) => {
+const normalizeSubtitleLanguage = (lang?: string | null) => {
     if (!lang) {
         return 'de';
     }
@@ -54,7 +54,7 @@ export const playArdItem = async (detail: ArdItemDetailResponse, playback: ArdPl
 
     const subtitleTracks = buildSubtitleTracks(playback.subtitles || []);
     const itemId = `local-ard-${detail.id || Date.now()}`;
-    const serverId = ServerConnections.currentApiClient()?.serverId();
+    const serverId = ServerConnections.currentApiClient()?.serverId() || undefined;
 
     await playbackManager.play({
         items: [{

@@ -1,3 +1,13 @@
+const isDigit = (char: string) => /[0-9]/.test(char);
+
+const isLetter = (char: string) => {
+    const upper = char.toUpperCase();
+    const lower = char.toLowerCase();
+    return upper !== lower;
+};
+
+const isWordChar = (char: string) => isDigit(char) || isLetter(char);
+
 export const normalizeSubtitleText = (text: string) => text
     .replace(/\{\\[^}]+\}/g, ' ')
     .replace(/<[^>]+>/g, ' ')
@@ -10,9 +20,33 @@ export const normalizeSubtitleText = (text: string) => text
     .normalize('NFC')
     .trim();
 
-export const tokenizeWords = (text: string) => (
-    text.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) || []
-);
+export const tokenizeWords = (text: string) => {
+    const tokens: string[] = [];
+    let current = '';
+
+    for (const char of text) {
+        if (isWordChar(char)) {
+            current += char;
+            continue;
+        }
+
+        if ((char === '\'' || char === '’' || char === '-') && current) {
+            current += char;
+            continue;
+        }
+
+        if (current) {
+            tokens.push(current.replace(/['’-]+$/g, ''));
+            current = '';
+        }
+    }
+
+    if (current) {
+        tokens.push(current.replace(/['’-]+$/g, ''));
+    }
+
+    return tokens.filter(Boolean);
+};
 
 export const titleCase = (value: string) => (
     value.charAt(0).toUpperCase() + value.slice(1)
