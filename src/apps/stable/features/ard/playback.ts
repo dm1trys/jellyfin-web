@@ -48,7 +48,7 @@ const buildSubtitleTracks = (subtitles: ArdSubtitleSource[]) => (
 
 export const playArdItem = async (detail: ArdItemDetailResponse, playback: ArdPlayResponse) => {
     if (!playback.hls) {
-        toast('No playable ARD stream found.');
+        toast(playback.restriction?.message || 'No playable ARD stream found.');
         return;
     }
 

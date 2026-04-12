@@ -107,6 +107,14 @@ export interface ArdRecommendationsResponse {
     items: ArdItem[];
 }
 
+export interface ArdSessionResponse {
+    userId: string | null;
+    hasBearerToken: boolean;
+    connected: boolean;
+    updatedAt: number | null;
+    hasLoginCredentials: boolean;
+}
+
 export interface ArdPlayResponse {
     id: string | null;
     title: string | null;
