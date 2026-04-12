@@ -15,7 +15,7 @@ const fetchConfigurationPages = async (
 ) => {
     const response = await getDashboardApi(api)
         .getConfigurationPages(params, options);
-    return response.data;
+    return Array.isArray(response.data) ? response.data : [];
 };
 
 const getConfigurationPagesQuery = (

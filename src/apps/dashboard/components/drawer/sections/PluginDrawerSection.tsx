@@ -16,6 +16,7 @@ const PluginDrawerSection = () => {
         data: pagesInfo,
         error
     } = useConfigurationPages({ enableInMainMenu: true });
+    const pluginPages = Array.isArray(pagesInfo) ? pagesInfo : [];
 
     useEffect(() => {
         if (error) console.error('[PluginDrawerSection] unable to fetch plugin config pages', error);
@@ -36,7 +37,7 @@ const PluginDrawerSection = () => {
                     '/configurationpage',
                     '/dashboard/plugins/repositories'
                 ]}
-                excludePaths={pagesInfo?.map(p => `/${Dashboard.getPluginUrl(p.Name)}`)}
+                excludePaths={pluginPages.map(p => `/${Dashboard.getPluginUrl(p.Name)}`)}
             >
                 <ListItemIcon>
                     <Extension />
@@ -44,7 +45,7 @@ const PluginDrawerSection = () => {
                 <ListItemText primary={globalize.translate('TabPlugins')} />
             </ListItemLink>
 
-            {pagesInfo?.map(pageInfo => (
+            {pluginPages.map(pageInfo => (
                 <ListItemLink
                     key={pageInfo.PluginId}
                     to={`/${Dashboard.getPluginUrl(pageInfo.Name)}`}
