@@ -57,7 +57,9 @@ const normalizeSubtitleText = (text) => text
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-    .join('\n')
+    .join(' ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/([\p{Ll}])([\p{Lu}][\p{Ll}])/gu, '$1 $2')
     .normalize('NFC')
     .trim();
 
