@@ -1,9 +1,11 @@
-import React, { type FC, type FormEvent, type PropsWithChildren, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { type FC, type PropsWithChildren } from 'react';
 
-import Page from 'components/Page';
-
+import ProviderPageLayout from 'apps/stable/features/feed/components/ProviderPageLayout';
+import ProviderSessionActions from 'apps/stable/features/feed/components/ProviderSessionActions';
+import { useProviderSessionControls } from 'apps/stable/features/feed/useProviderSessionControls';
 import { clearArdSession, fetchArdSession, loginArdSession } from '../api';
+import { ARD_PROVIDER } from '../provider';
+import type { ArdSessionResponse } from '../types';
 import '../style.scss';
 
 type ArdPageLayoutProps = PropsWithChildren<{
@@ -13,114 +15,76 @@ type ArdPageLayoutProps = PropsWithChildren<{
 }>;
 
 const ArdPageLayout: FC<ArdPageLayoutProps> = ({ id, title, query = '', children }) => {
-    const navigate = useNavigate();
-    const [searchQuery, setSearchQuery] = useState(query);
-    const [ardConnected, setArdConnected] = useState(false);
-    const [ardLoginConfigured, setArdLoginConfigured] = useState(false);
-    const [ardStatus, setArdStatus] = useState('ARD account not connected');
-    const [ardBusy, setArdBusy] = useState(false);
-
-    useEffect(() => {
-        let cancelled = false;
-
-        fetchArdSession()
-            .then((session) => {
-                if (cancelled) {
-                    return;
-                }
-
-                setArdConnected(session.connected);
-                setArdLoginConfigured(session.hasLoginCredentials);
-                setArdStatus(session.connected
-                    ? `ARD account connected${session.userId ? `: ${session.userId}` : ''}`
-                    : session.hasLoginCredentials
-                        ? 'ARD account not connected'
-                        : 'ARD login credentials are not configured');
-            })
-            .catch(() => {
-                if (!cancelled) {
-                    setArdStatus('Could not load ARD account session');
-                }
-            });
-
-        return () => {
-            cancelled = true;
-        };
-    }, []);
-
-    const onSubmit = (event: FormEvent<HTMLFormElement>) => {
-        event.preventDefault();
-        const trimmed = searchQuery.trim();
-        if (trimmed) {
-            navigate(`/ardsearch?query=${encodeURIComponent(trimmed)}`);
-        }
-    };
-
-    const onConnectArd = async () => {
-        setArdBusy(true);
-
-        try {
+    const describeSession = (session: ArdSessionResponse) => ({
+        connected: session.connected,
+        connectEnabled: session.hasLoginCredentials,
+        status: session.connected
+            ? `ARD account connected${session.userId ? `: ${session.userId}` : ''}`
+            : session.hasLoginCredentials
+                ? 'ARD account not connected'
+                : 'ARD login credentials are not configured'
+    });
+    const {
+        connected,
+        connectEnabled,
+        status,
+        busy,
+        connect,
+        disconnect,
+        setStatus
+    } = useProviderSessionControls({
+        loadSession: fetchArdSession,
+        connectSession: async () => {
             const session = await loginArdSession();
-            setArdConnected(session.connected);
-            setArdLoginConfigured(session.hasLoginCredentials);
-            setArdStatus(session.connected
-                ? `ARD account connected${session.userId ? `: ${session.userId}` : ''}`
-                : 'ARD login completed, but session is incomplete');
-        } catch (_error) {
-            setArdStatus('Could not log in to ARD account');
-        } finally {
-            setArdBusy(false);
-        }
-    };
+            if (!session.connected) {
+                setStatus('ARD login completed, but session is incomplete');
+            }
+            return session;
+        },
+        disconnectSession: clearArdSession,
+        getInitialState: () => ({
+            connected: false,
+            connectEnabled: false,
+            status: 'ARD account not connected'
+        }),
+        mapLoadedState: describeSession,
+        getLoadFailureStatus: () => 'Could not load ARD account session',
+        getConnectFailureStatus: () => 'Could not log in to ARD account',
+        getDisconnectFailureStatus: () => 'Could not clear ARD account session'
+    });
 
     const onDisconnectArd = async () => {
-        setArdBusy(true);
-
         try {
-            await clearArdSession();
-            setArdConnected(false);
-            setArdStatus('ARD account disconnected');
+            await disconnect();
+            setStatus('ARD account disconnected');
         } catch (_error) {
-            setArdStatus('Could not clear ARD account session');
-        } finally {
-            setArdBusy(false);
+            // unreachable, hook already handles error state
         }
     };
 
     return (
-        <Page
+        <ProviderPageLayout
             id={id}
             title={title}
-            className='mainAnimatedPage libraryPage noSecondaryNavPage ardPage'
+            query={query}
+            searchPlaceholder={ARD_PROVIDER.searchPlaceholder}
+            searchRoute={ARD_PROVIDER.routes.search}
+            navLinks={ARD_PROVIDER.navLinks}
+            renderHeaderExtra={(
+                <ProviderSessionActions
+                    connectLabel='Verbinden'
+                    disconnectLabel='Trennen'
+                    connected={connected}
+                    connectEnabled={connectEnabled}
+                    busy={busy}
+                    status={status}
+                    onConnect={connect}
+                    onDisconnect={onDisconnectArd}
+                />
+            )}
         >
-            <div className='padded-left padded-right padded-bottom-page'>
-                <header className='ardPage-header'>
-                    <div className='ardPage-nav'>
-                        <Link to='/ardhome'>ARD</Link>
-                        <Link to='/ardsearch'>Suche</Link>
-                    </div>
-                    <form className='ardPage-search' onSubmit={onSubmit}>
-                        <input
-                            type='search'
-                            value={searchQuery}
-                            onChange={(event) => setSearchQuery(event.target.value)}
-                            placeholder='ARD Mediathek durchsuchen'
-                        />
-                        <button type='submit'>Suchen</button>
-                    </form>
-                    <div className='ardPage-account'>
-                        <button type='button' disabled={ardBusy || !ardLoginConfigured} onClick={onConnectArd}>
-                            Verbinden
-                        </button>
-                        <button type='button' className='ardButton ardButton--secondary' disabled={ardBusy || !ardConnected} onClick={onDisconnectArd}>
-                            Trennen
-                        </button>
-                        <div className='ardPage-accountStatus'>{ardStatus}</div>
-                    </div>
-                </header>
-                {children}
-            </div>
-        </Page>
+            {children}
+        </ProviderPageLayout>
     );
 };
 

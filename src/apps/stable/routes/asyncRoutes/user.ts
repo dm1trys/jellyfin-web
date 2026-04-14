@@ -1,10 +1,8 @@
 import { AsyncRoute } from '../../../../components/router/AsyncRoute';
+import { PROVIDER_ASYNC_USER_ROUTES } from '../../features/feed/providerRoutes';
 
 export const ASYNC_USER_ROUTES: AsyncRoute[] = [
-    { path: 'ardhome', page: 'ard/home' },
-    { path: 'ardpage', page: 'ard/page' },
-    { path: 'ardsearch', page: 'ard/search' },
-    { path: 'arditem/:id', page: 'ard/item' },
+    ...PROVIDER_ASYNC_USER_ROUTES,
     { path: 'mypreferencesmenu', page: 'user/settings' },
     { path: 'quickconnect', page: 'quickConnect' },
     { path: 'search', page: 'search' },

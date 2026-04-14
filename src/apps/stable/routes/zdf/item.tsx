@@ -1,74 +1,52 @@
-import React, { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation, useParams } from 'react-router-dom';
 
-import { fetchArdItem, fetchArdPlay } from 'apps/stable/features/ard/api';
-import ArdPageLayout from 'apps/stable/features/ard/components/ArdPageLayout';
-import { mapArdItemDetailToFeedItemDetail, mapArdRowsToFeedShelves, resolveArdFeedCardHref } from 'apps/stable/features/ard/feed';
-import { ARD_PROVIDER } from 'apps/stable/features/ard/provider';
+import { fetchZdfItem, fetchZdfPlay } from 'apps/stable/features/zdf/api';
 import FeedItemDetailView from 'apps/stable/features/feed/components/FeedItemDetailView';
-import FeedShelf from 'apps/stable/features/feed/components/FeedShelf';
 import FeedSubtitleSection from 'apps/stable/features/feed/components/FeedSubtitleSection';
 import { useAsyncData } from 'apps/stable/features/feed/useAsyncData';
-import { playArdItem } from 'apps/stable/features/ard/playback';
-import { ServerConnections } from 'lib/jellyfin-apiclient';
+import ZdfPageLayout from 'apps/stable/features/zdf/components/ZdfPageLayout';
+import { mapZdfItemDetailToFeedItemDetail } from 'apps/stable/features/zdf/feed';
+import { playZdfItem } from 'apps/stable/features/zdf/playback';
+import { resolveZdfHref } from 'apps/stable/features/zdf/routing';
+import 'apps/stable/features/zdf/style.scss';
 
-const getCurrentUserAgeRating = async () => {
-    const apiClient = ServerConnections.currentApiClient();
-    if (!apiClient) {
-        return null;
-    }
-
-    try {
-        const user = await apiClient.getCurrentUser();
-        const ageRating = user?.Policy?.MaxParentalRating;
-        return typeof ageRating === 'number' && Number.isFinite(ageRating) ? ageRating : null;
-    } catch (_error) {
-        return null;
-    }
-};
-
-export default function ArdItem() {
-    const { id = '' } = useParams();
+export default function ZdfItem() {
+    const params = useParams();
+    const location = useLocation();
+    const routePath = params['*'] || '';
+    const href = useMemo(() => resolveZdfHref(routePath, location.search), [routePath, location.search]);
     const [isPlaying, setIsPlaying] = useState(false);
-    const [ageRating, setAgeRating] = useState<number | null>(null);
     const { data, error } = useAsyncData(
-        async () => {
-            const resolvedAgeRating = await getCurrentUserAgeRating();
-            setAgeRating(resolvedAgeRating);
-            return fetchArdItem(id, resolvedAgeRating);
-        },
-        [id],
+        async () => fetchZdfItem(href),
+        [href],
         {
-            enabled: Boolean(id),
-            disableError: 'Missing ARD item id',
-            errorMessage: 'Failed to load ARD item'
+            enabled: Boolean(href),
+            disableError: 'Missing ZDF item url',
+            errorMessage: 'Failed to load ZDF item'
         }
     );
-    const detail = data ? mapArdItemDetailToFeedItemDetail(data) : null;
+    const detail = data ? mapZdfItemDetailToFeedItemDetail(data) : null;
 
-    const hasPlayableStream = Boolean(
-        data?.playback?.streams?.some((group) =>
-            Array.isArray(group?.media) && group.media.some((media) => Boolean(media?.url))
-        )
-    );
+    const hasPlayableStream = Boolean(data?.playback?.hls);
 
     const onPlay = async () => {
-        if (!data || !id || isPlaying || !hasPlayableStream) {
+        if (!data || !href || isPlaying || !hasPlayableStream) {
             return;
         }
 
         try {
             setIsPlaying(true);
-            const playback = await fetchArdPlay(id, ageRating);
-            await playArdItem(data, playback);
+            const playback = await fetchZdfPlay(href);
+            await playZdfItem(data, playback);
         } finally {
             setIsPlaying(false);
         }
     };
 
     return (
-        <ArdPageLayout id='ardItemPage' title={data?.title || 'ARD Item'}>
-            {!data && !error ? <div className='ardState'>Loading item…</div> : null}
+        <ZdfPageLayout id='zdfItemPage' title={data?.title || 'ZDF Item'}>
+            {!data && !error ? <div className='ardState'>Loading ZDF item…</div> : null}
             {error ? <div className='ardState'>{error}</div> : null}
             {data && detail ? (
                 <>
@@ -94,7 +72,7 @@ export default function ArdItem() {
                             <>
                                 {!detail.subtitles.length && hasPlayableStream ? (
                                     <p className='ardHero-description'>
-                                        ARD does not provide subtitle tracks for this video, so pause translation is unavailable.
+                                        ZDF does not provide subtitle tracks for this video, so pause translation is unavailable.
                                     </p>
                                 ) : null}
                                 {!hasPlayableStream && detail.restriction?.message ? (
@@ -103,15 +81,13 @@ export default function ArdItem() {
                                         {detail.restriction.maturity ? ` (${detail.restriction.maturity})` : ''}
                                     </p>
                                 ) : null}
+                                {detail.notes.map((note) => <p key={note} className='ardHero-description'>{note}</p>)}
                             </>
                         )}
                     />
                     <FeedSubtitleSection providerLabel={detail.provider} subtitles={detail.subtitles} />
-                    {mapArdRowsToFeedShelves(data.relatedRows).map((row) => (
-                        <FeedShelf key={row.id} title={row.title || ARD_PROVIDER.defaults.shelfTitle} items={row.items} resolveHref={resolveArdFeedCardHref} />
-                    ))}
                 </>
             ) : null}
-        </ArdPageLayout>
+        </ZdfPageLayout>
     );
 }
