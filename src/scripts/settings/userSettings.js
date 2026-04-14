@@ -366,6 +366,14 @@ export class UserSettings {
         return this.get('pauseTranslateTargetLanguage', false) || 'uk';
     }
 
+    pauseTranslateEnableNumericShortcuts(val) {
+        if (val !== undefined) {
+            return this.set('pauseTranslateEnableNumericShortcuts', val.toString(), false);
+        }
+
+        return toBoolean(this.get('pauseTranslateEnableNumericShortcuts', false), true);
+    }
+
     /**
      * Get or set datetime locale.
      * @param {string|undefined} [val] - Datetime locale.
@@ -716,6 +724,7 @@ export const useEpisodeImagesInNextUpAndResume = currentSettings.useEpisodeImage
 export const language = currentSettings.language.bind(currentSettings);
 export const pauseTranslateSourceLanguage = currentSettings.pauseTranslateSourceLanguage.bind(currentSettings);
 export const pauseTranslateTargetLanguage = currentSettings.pauseTranslateTargetLanguage.bind(currentSettings);
+export const pauseTranslateEnableNumericShortcuts = currentSettings.pauseTranslateEnableNumericShortcuts.bind(currentSettings);
 export const dateTimeLocale = currentSettings.dateTimeLocale.bind(currentSettings);
 export const skipBackLength = currentSettings.skipBackLength.bind(currentSettings);
 export const skipForwardLength = currentSettings.skipForwardLength.bind(currentSettings);

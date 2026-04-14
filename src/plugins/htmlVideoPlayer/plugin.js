@@ -1951,7 +1951,10 @@ export class HtmlVideoPlayer {
             this.#videoSecondarySubtitlesElem
         ]
             .filter((element) => element && !element.classList.contains('hide'))
-            .map((element) => element.textContent?.trim())
+            .map((element) => {
+                const renderedText = element.innerText || element.textContent || '';
+                return renderedText.trim();
+            })
             .filter(Boolean)
             .join('\n');
 

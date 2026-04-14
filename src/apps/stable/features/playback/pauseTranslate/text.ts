@@ -8,7 +8,32 @@ const isLetter = (char: string) => {
 
 const isWordChar = (char: string) => isDigit(char) || isLetter(char);
 
-export const normalizeSubtitleText = (text: string) => text
+const isLowercaseLetter = (char: string) => isLetter(char) && char === char.toLowerCase() && char !== char.toUpperCase();
+
+const isUppercaseLetter = (char: string) => isLetter(char) && char === char.toUpperCase() && char !== char.toLowerCase();
+
+const separateWordBoundaries = (text: string) => {
+    let normalized = '';
+
+    for (let index = 0; index < text.length; index += 1) {
+        const current = text[index];
+        const next = text[index + 1];
+
+        normalized += current;
+
+        if (!next) {
+            continue;
+        }
+
+        if (isLowercaseLetter(current) && isUppercaseLetter(next)) {
+            normalized += ' ';
+        }
+    }
+
+    return normalized;
+};
+
+export const normalizeSubtitleText = (text: string) => separateWordBoundaries(text
     .replace(/\{\\[^}]+\}/g, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\r/g, '')
@@ -17,8 +42,7 @@ export const normalizeSubtitleText = (text: string) => text
     .map((line) => line.trim())
     .filter(Boolean)
     .join(' ')
-    .replace(/\s{2,}/g, ' ')
-    .replace(/([\p{Ll}])([\p{Lu}][\p{Ll}])/gu, '$1 $2')
+    .replace(/\s{2,}/g, ' '))
     .normalize('NFC')
     .trim();
 

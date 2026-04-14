@@ -38,6 +38,15 @@ function getOpenedDialog() {
     return document.querySelector('.dialogContainer .dialog.opened');
 }
 
+function isPauseTranslateNumericShortcutActive() {
+    if (!userSettings.pauseTranslateEnableNumericShortcuts()) {
+        return false;
+    }
+
+    const overlay = document.querySelector('.pauseTranslateOverlay');
+    return Boolean(overlay && !overlay.classList.contains('hide'));
+}
+
 export default function (view) {
     function getDisplayItem(item) {
         if (item.Type === 'TvChannel') {
@@ -1390,6 +1399,10 @@ export default function (view) {
             case '7':
             case '8':
             case '9': { // no Shift
+                if (isPauseTranslateNumericShortcutActive()) {
+                    break;
+                }
+
                 e.preventDefault();
                 const percent = parseInt(key, 10) * 10;
                 playbackManager.seekPercent(percent, currentPlayer);
@@ -2072,4 +2085,3 @@ export default function (view) {
         });
     }
 }
-

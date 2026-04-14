@@ -71,6 +71,7 @@ function loadForm(context, user, userSettings, appearanceSettings, apiClient) {
         selectSubtitleLanguage.value = user.Configuration.SubtitleLanguagePreference || '';
         selectPauseTranslateSourceLanguage.value = userSettings.pauseTranslateSourceLanguage();
         selectPauseTranslateTargetLanguage.value = userSettings.pauseTranslateTargetLanguage();
+        context.querySelector('#chkPauseTranslateNumericShortcuts').checked = userSettings.pauseTranslateEnableNumericShortcuts();
         context.querySelector('#selectSubtitlePlaybackMode').value = user.Configuration.SubtitleMode || '';
 
         context.querySelector('#selectSubtitlePlaybackMode').dispatchEvent(new CustomEvent('change', {}));
@@ -110,6 +111,7 @@ function saveUser(context, user, userSettingsInstance, appearanceKey, apiClient)
     user.Configuration.SubtitleMode = context.querySelector('#selectSubtitlePlaybackMode').value;
     userSettingsInstance.pauseTranslateSourceLanguage(context.querySelector('#selectPauseTranslateSourceLanguage').value);
     userSettingsInstance.pauseTranslateTargetLanguage(context.querySelector('#selectPauseTranslateTargetLanguage').value);
+    userSettingsInstance.pauseTranslateEnableNumericShortcuts(context.querySelector('#chkPauseTranslateNumericShortcuts').checked);
 
     return apiClient.updateUserConfiguration(user.Id, user.Configuration);
 }

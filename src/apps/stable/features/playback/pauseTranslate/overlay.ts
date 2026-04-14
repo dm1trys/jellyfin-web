@@ -1,4 +1,5 @@
 import type { OverlayTone, WordInspectorEntry } from './types';
+import { currentSettings } from 'scripts/settings/userSettings';
 import { tokenizeWords } from './text';
 
 const OVERLAY_CLASS = 'pauseTranslateOverlay';
@@ -163,7 +164,7 @@ export class PauseTranslateOverlay {
 
         this.overlay.append(this.originalNode, this.translatedNode, this.wordsNode, this.inspectorNode);
         this.overlay.addEventListener('click', this.handleClick);
-        document.addEventListener('keydown', this.handleKeydown);
+        document.addEventListener('keydown', this.handleKeydown, true);
         document.body.appendChild(this.overlay);
     }
 
@@ -217,6 +218,7 @@ export class PauseTranslateOverlay {
             || event.altKey
             || event.ctrlKey
             || event.metaKey
+            || !currentSettings.pauseTranslateEnableNumericShortcuts()
             || !this.overlay
             || this.overlay.classList.contains('hide')
         ) {
@@ -248,6 +250,8 @@ export class PauseTranslateOverlay {
         }
 
         event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
         this.onWordSelect(word);
     };
 }
