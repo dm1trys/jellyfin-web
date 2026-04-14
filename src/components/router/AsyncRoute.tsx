@@ -14,14 +14,45 @@ export interface AsyncRoute {
     type?: AppType
 }
 
+const CHUNK_RELOAD_KEY = 'jellyfin:chunk-reload';
+
+const isChunkLoadError = (error: unknown) => {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+
+    return error.name === 'ChunkLoadError'
+        || /ChunkLoadError|Loading chunk [\d]+ failed|Failed to fetch dynamically imported module/i.test(error.message);
+};
+
+export async function importWithChunkRecovery<T>(loader: () => Promise<T>): Promise<T> {
+    try {
+        const result = await loader();
+        window.sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+        return result;
+    } catch (error) {
+        if (!isChunkLoadError(error)) {
+            throw error;
+        }
+
+        const didReload = window.sessionStorage.getItem(CHUNK_RELOAD_KEY) === '1';
+        if (!didReload) {
+            window.sessionStorage.setItem(CHUNK_RELOAD_KEY, '1');
+            window.location.reload();
+        }
+
+        throw error;
+    }
+}
+
 const importRoute = (page: string, type: AppType) => {
     switch (type) {
         case AppType.Dashboard:
-            return import(/* webpackChunkName: "[request]" */ `../../apps/dashboard/routes/${page}`);
+            return importWithChunkRecovery(() => import(/* webpackChunkName: "[request]" */ `../../apps/dashboard/routes/${page}`));
         case AppType.Experimental:
-            return import(/* webpackChunkName: "[request]" */ `../../apps/experimental/routes/${page}`);
+            return importWithChunkRecovery(() => import(/* webpackChunkName: "[request]" */ `../../apps/experimental/routes/${page}`));
         case AppType.Stable:
-            return import(/* webpackChunkName: "[request]" */ `../../apps/stable/routes/${page}`);
+            return importWithChunkRecovery(() => import(/* webpackChunkName: "[request]" */ `../../apps/stable/routes/${page}`));
     }
 };
 

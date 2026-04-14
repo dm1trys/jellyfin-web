@@ -2,7 +2,7 @@ import React from 'react';
 import { Navigate, RouteObject } from 'react-router-dom';
 
 import ConnectionRequired from 'components/ConnectionRequired';
-import { toAsyncPageRoute } from 'components/router/AsyncRoute';
+import { importWithChunkRecovery, toAsyncPageRoute } from 'components/router/AsyncRoute';
 import { toViewManagerPageRoute } from 'components/router/LegacyRoute';
 import ErrorBoundary from 'components/router/ErrorBoundary';
 import FallbackRoute from 'components/router/FallbackRoute';
@@ -14,7 +14,7 @@ import VideoPage from './video';
 export const EXPERIMENTAL_APP_ROUTES: RouteObject[] = [
     {
         path: '/*',
-        lazy: () => import('../AppLayout'),
+        lazy: () => importWithChunkRecovery(() => import('../AppLayout')),
         children: [
             { index: true, element: <Navigate replace to='/home' /> },
 
