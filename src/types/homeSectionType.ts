@@ -3,6 +3,7 @@
 export enum HomeSectionType {
     None = 'none',
     ArdMediathek = 'ardmediathek',
+    ZdfMediathek = 'zdfmediathek',
     SmallLibraryTiles = 'smalllibrarytiles',
     LibraryButtons = 'librarybuttons',
     ActiveRecordings = 'activerecordings',

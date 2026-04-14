@@ -14,6 +14,7 @@ import { loadLiveTV } from './sections/liveTv';
 import { loadNextUp } from './sections/nextUp';
 import { loadRecentlyAdded } from './sections/recentlyAdded';
 import { loadResume } from './sections/resume';
+import { loadZdfMediathek } from './sections/zdfMediathek';
 
 import 'elements/emby-button/paper-icon-button-light';
 import 'elements/emby-itemscontainer/emby-itemscontainer';
@@ -151,6 +152,9 @@ function loadSection(page, apiClient, user, userSettings, userViews, allSections
     switch (section) {
         case HomeSectionType.ArdMediathek:
             loadArdMediathek(elem, options);
+            break;
+        case HomeSectionType.ZdfMediathek:
+            loadZdfMediathek(elem, options);
             break;
         case HomeSectionType.ActiveRecordings:
             loadRecordings(elem, true, apiClient, options);
